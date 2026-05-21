@@ -1,0 +1,5 @@
+# Example: combine several profiles by setting:
+# CONTEXT_KIT_DOCS_SOURCES="config/sources.default.txt config/sources.ruby-ai.txt config/sources.js.txt"
+#
+# This file is intentionally comments-only. Use the profile files above instead
+# of maintaining a second copy of the same URLs.

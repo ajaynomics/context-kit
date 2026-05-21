@@ -1,0 +1,9 @@
+# Default Context Kit docs sources.
+# Keep this set small, useful, and quick to index. Add profiles when needed.
+
+https://code.claude.com/docs/llms.txt
+https://developers.openai.com/api/docs/llms.txt
+https://developers.openai.com/api/reference/llms.txt
+https://docs.anthropic.com/llms.txt
+https://openrouter.ai/docs/llms.txt
+https://modelcontextprotocol.io/llms-full.txt

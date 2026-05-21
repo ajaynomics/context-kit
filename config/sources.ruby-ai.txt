@@ -1,0 +1,4 @@
+# Optional Ruby / AI application docs.
+
+https://rubyllm.com/llms.txt
+https://docs.langchain.com/llms.txt

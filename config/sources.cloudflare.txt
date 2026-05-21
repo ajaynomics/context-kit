@@ -1,0 +1,5 @@
+# Optional Cloudflare docs.
+# Warning: this source can expand to thousands of sections and take a while to
+# embed on first index. Keep it opt-in unless your work needs it frequently.
+
+https://developers.cloudflare.com/llms.txt

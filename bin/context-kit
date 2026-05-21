@@ -1,0 +1,419 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ENV_FILE="${ROOT}/.env"
+
+load_env_file() {
+  [[ -f "${ENV_FILE}" ]] || return 0
+
+  local line key value
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    line="${line%$'\r'}"
+    [[ -z "${line}" || "${line}" =~ ^[[:space:]]*# ]] && continue
+    [[ "${line}" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]] || fail "unsupported .env line: ${line}"
+    key="${BASH_REMATCH[1]}"
+    value="${BASH_REMATCH[2]}"
+    [[ "${key}" == CONTEXT_KIT_* ]] || fail ".env may only set CONTEXT_KIT_* variables: ${key}"
+    [[ "${!key+x}" == "x" ]] && continue
+    if [[ "${value}" == \"*\" && "${value}" == *\" ]]; then
+      value="${value:1:${#value}-2}"
+    elif [[ "${value}" == \'*\' && "${value}" == *\' ]]; then
+      value="${value:1:${#value}-2}"
+    fi
+    export "${key}=${value}"
+  done < "${ENV_FILE}"
+}
+
+fail() {
+  printf 'context-kit: %s\n' "$*" >&2
+  exit 1
+}
+
+load_env_file
+
+PROJECT="${CONTEXT_KIT_COMPOSE_PROJECT:-context-kit}"
+COMPOSE_FILE="${ROOT}/compose.yml"
+DATA_DIR="${CONTEXT_KIT_DATA_DIR:-${HOME}/.local/share/context-kit}"
+NETWORK="${CONTEXT_KIT_DOCKER_NETWORK:-${PROJECT}_default}"
+SEARXNG_PORT="${CONTEXT_KIT_SEARXNG_PORT:-8099}"
+
+WEB_SEARCH_IMAGE="${CONTEXT_KIT_WEB_SEARCH_IMAGE:-context-kit/web-search-mcp:latest}"
+DOCS_IMAGE="${CONTEXT_KIT_DOCS_IMAGE:-context-kit/docs-mcp:latest}"
+REPOMIX_IMAGE="${CONTEXT_KIT_REPOMIX_IMAGE:-ghcr.io/yamadashy/repomix@sha256:62fb288a3f031f99bc332b73c22acb9ff1cf2a5d8ef2f0196185d5926d9edb2a}"
+
+usage() {
+  cat <<'USAGE'
+context-kit: local context tools for coding agents
+
+Usage:
+  context-kit start                 Start SearXNG and ensure default images exist
+  context-kit stop                  Stop the SearXNG service
+  context-kit restart               Restart SearXNG
+  context-kit build                 Build MCP images
+  context-kit status                Show services, images, and configured docs sources
+  context-kit doctor                Check Docker, services, images, and sources
+  context-kit redaction-check       Scan this repo for local paths and secret patterns
+
+MCP server commands:
+  context-kit web-search            Run the SearXNG-backed web-search MCP server
+  context-kit docs                  Run the local llms.txt docs MCP server
+  context-kit repomix               Run Repomix MCP for the current project
+
+Assistant snippets:
+  context-kit install claude        Print a project .mcp.json snippet using context-kit on PATH
+  context-kit install opencode      Print an opencode.json MCP snippet using context-kit on PATH
+
+Configuration is via .env or environment variables. See .env.example.
+USAGE
+}
+
+compose() {
+  CONTEXT_KIT_DATA_DIR="${DATA_DIR}" \
+  CONTEXT_KIT_SEARXNG_PORT="${SEARXNG_PORT}" \
+  BUILDX_BUILDER="${CONTEXT_KIT_BUILDX_BUILDER:-${BUILDX_BUILDER:-default}}" \
+  docker compose -p "${PROJECT}" -f "${COMPOSE_FILE}" "$@"
+}
+
+warn() {
+  printf 'warn: %s\n' "$*" >&2
+}
+
+json_escape() {
+  local s="$1"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  s="${s//$'\n'/\\n}"
+  s="${s//$'\r'/\\r}"
+  s="${s//$'\t'/\\t}"
+  printf '%s' "${s}"
+}
+
+require_docker() {
+  command -v docker >/dev/null 2>&1 || fail "Docker is required"
+  docker info >/dev/null 2>&1 || fail "Docker is not running or not reachable"
+}
+
+require_image() {
+  local image="$1"
+  local hint="$2"
+  docker image inspect "${image}" >/dev/null 2>&1 || fail "missing image ${image}; run: ${hint}"
+}
+
+require_network() {
+  docker network inspect "${NETWORK}" >/dev/null 2>&1 || fail "missing Docker network ${NETWORK}; run: context-kit start"
+}
+
+wait_for_searxng() {
+  command -v curl >/dev/null 2>&1 || return 0
+
+  local attempt
+  for attempt in {1..30}; do
+    if curl -fsS "http://127.0.0.1:${SEARXNG_PORT}/healthz" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  warn "SearXNG did not become ready on 127.0.0.1:${SEARXNG_PORT} after 30s"
+}
+
+abs_dir() {
+  local path="$1"
+  mkdir -p "${path}"
+  (cd "${path}" && pwd -P)
+}
+
+project_dir() {
+  local dir="${CONTEXT_KIT_PROJECT_DIR:-${CLAUDE_PROJECT_DIR:-${PWD}}}"
+  (cd "${dir}" && pwd -P)
+}
+
+source_files() {
+  local configured="${CONTEXT_KIT_DOCS_SOURCES:-config/sources.default.txt}"
+  local file
+  for file in ${configured}; do
+    if [[ "${file}" = /* ]]; then
+      printf '%s\n' "${file}"
+    else
+      printf '%s\n' "${ROOT}/${file}"
+    fi
+  done
+}
+
+resolved_sources() {
+  local file line
+  while IFS= read -r file; do
+    [[ -f "${file}" ]] || fail "docs source file not found: ${file}"
+    while IFS= read -r line; do
+      line="${line%%#*}"
+      line="${line//[$'\t\r\n ']/}"
+      [[ -z "${line}" ]] && continue
+      printf '%s\n' "${line}"
+    done < "${file}"
+  done < <(source_files)
+}
+
+cmd_build() {
+  [[ "$#" -eq 0 ]] || fail "usage: context-kit build"
+  require_docker
+  compose --profile mcp build web-search-mcp docs-mcp
+  docker pull "${REPOMIX_IMAGE}"
+}
+
+cmd_start() {
+  require_docker
+  mkdir -p "${DATA_DIR}"
+  if ! docker image inspect "${WEB_SEARCH_IMAGE}" >/dev/null 2>&1 || ! docker image inspect "${DOCS_IMAGE}" >/dev/null 2>&1; then
+    cmd_build
+  fi
+  compose up -d searxng
+  wait_for_searxng
+}
+
+cmd_stop() {
+  require_docker
+  compose stop searxng
+}
+
+cmd_status() {
+  require_docker
+  printf 'Services\n'
+  compose ps
+  printf '\nImages\n'
+  docker image ls --format '{{.Repository}}:{{.Tag}}\t{{.Size}}' \
+    | grep -E '^(context-kit/|ghcr.io/yamadashy/repomix:)' || true
+  printf '\nDocs sources\n'
+  resolved_sources | sed 's/^/- /'
+  printf '\nData directory\n- %s\n' "${DATA_DIR}"
+}
+
+cmd_doctor() {
+  local ok=0
+  printf 'Context Kit doctor\n'
+
+  if command -v docker >/dev/null 2>&1; then
+    printf 'pass docker command found\n'
+  else
+    printf 'fail docker command not found\n'; ok=1
+  fi
+
+  if docker info >/dev/null 2>&1; then
+    printf 'pass docker daemon reachable\n'
+  else
+    printf 'fail docker daemon not reachable\n'; ok=1
+  fi
+
+  if docker compose version >/dev/null 2>&1; then
+    printf 'pass docker compose available\n'
+  else
+    printf 'fail docker compose unavailable\n'; ok=1
+  fi
+
+  if docker network inspect "${NETWORK}" >/dev/null 2>&1; then
+    printf 'pass docker network exists: %s\n' "${NETWORK}"
+  else
+    printf 'warn docker network missing: %s (run context-kit start)\n' "${NETWORK}"
+  fi
+
+  for image in "${WEB_SEARCH_IMAGE}" "${DOCS_IMAGE}" "${REPOMIX_IMAGE}"; do
+    if docker image inspect "${image}" >/dev/null 2>&1; then
+      printf 'pass image exists: %s\n' "${image}"
+    else
+      printf 'warn image missing: %s\n' "${image}"
+    fi
+  done
+
+  if command -v curl >/dev/null 2>&1 && curl -fsS "http://127.0.0.1:${SEARXNG_PORT}/healthz" >/dev/null 2>&1; then
+    printf 'pass SearXNG responds on 127.0.0.1:%s\n' "${SEARXNG_PORT}"
+  else
+    printf 'warn SearXNG not responding on 127.0.0.1:%s\n' "${SEARXNG_PORT}"
+  fi
+
+  if [[ "$(resolved_sources | wc -l | tr -d ' ')" -gt 0 ]]; then
+    printf 'pass docs sources resolve\n'
+  else
+    printf 'fail no docs sources configured\n'; ok=1
+  fi
+
+  return "${ok}"
+}
+
+cmd_web_search() {
+  require_docker
+  require_network
+  require_image "${WEB_SEARCH_IMAGE}" "context-kit build"
+  exec docker run --rm -i \
+    --label dev.context-kit=true \
+    --network "${NETWORK}" \
+    -e DEFAULT_SEARCH_PROVIDER="${DEFAULT_SEARCH_PROVIDER:-searxng}" \
+    -e SEARXNG_URL="${SEARXNG_URL:-http://searxng:8080}" \
+    -e CHROME_PATH="${CHROME_PATH:-/usr/bin/chromium}" \
+    -e HTTP_TIMEOUT="${HTTP_TIMEOUT:-15000}" \
+    -e MAX_RESULTS="${MAX_RESULTS:-10}" \
+    "${WEB_SEARCH_IMAGE}"
+}
+
+cmd_docs() {
+  require_docker
+  require_image "${DOCS_IMAGE}" "context-kit build"
+  local docs_dir models_dir ttl max_get_bytes embed_model
+  docs_dir="$(abs_dir "${DATA_DIR}/docs")"
+  models_dir="$(abs_dir "${DATA_DIR}/models")"
+  ttl="${CONTEXT_KIT_DOCS_TTL:-7d}"
+  max_get_bytes="${CONTEXT_KIT_DOCS_MAX_GET_BYTES:-75000}"
+  embed_model="${CONTEXT_KIT_DOCS_EMBED_MODEL:-BAAI/bge-small-en-v1.5}"
+  local sources=() source
+  while IFS= read -r source; do
+    sources+=("${source}")
+  done < <(resolved_sources)
+  [[ "${#sources[@]}" -gt 0 ]] || fail "no docs sources configured"
+  exec docker run --rm -i \
+    --label dev.context-kit=true \
+    --user "$(id -u):$(id -g)" \
+    -e HOME=/tmp \
+    -e USER=context-kit \
+    -e LOGNAME=context-kit \
+    -e TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor \
+    -v "${docs_dir}:/data" \
+    -v "${models_dir}:/models" \
+    "${DOCS_IMAGE}" \
+    --store-path /data \
+    --ttl "${ttl}" \
+    --max-get-bytes "${max_get_bytes}" \
+    --embed-model "${embed_model}" \
+    "${sources[@]}"
+}
+
+cmd_repomix() {
+  require_docker
+  require_image "${REPOMIX_IMAGE}" "docker pull ${REPOMIX_IMAGE}"
+  local dir mount_dir
+  dir="$(project_dir)"
+  mount_dir="${CONTEXT_KIT_REPOMIX_MOUNT_DIR:-${dir}}"
+  mount_dir="$(cd "${mount_dir}" && pwd -P)"
+  exec docker run --rm -i \
+    --label dev.context-kit=true \
+    -v "${mount_dir}:${mount_dir}:ro" \
+    --workdir "${dir}" \
+    "${REPOMIX_IMAGE}" --mcp
+}
+
+snippet_command() {
+  case "${1:-}" in
+    --absolute) printf '%s' "${ROOT}/bin/context-kit" ;;
+    "") printf '%s' "context-kit" ;;
+    *) fail "unknown install option: ${1}" ;;
+  esac
+}
+
+print_opencode() {
+  local bin
+  bin="$(json_escape "$(snippet_command "${1:-}")")"
+  cat <<JSON
+{
+  "\$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "context-web-search": {
+      "type": "local",
+      "command": ["${bin}", "web-search"],
+      "enabled": true,
+      "timeout": 60000
+    },
+    "context-docs": {
+      "type": "local",
+      "command": ["${bin}", "docs"],
+      "enabled": true,
+      "timeout": 120000
+    },
+    "context-repomix": {
+      "type": "local",
+      "command": ["${bin}", "repomix"],
+      "enabled": true,
+      "timeout": 120000
+    }
+  }
+}
+JSON
+}
+
+print_claude() {
+  local bin
+  bin="$(json_escape "$(snippet_command "${1:-}")")"
+  cat <<JSON
+{
+  "mcpServers": {
+    "context-web-search": {
+      "command": "${bin}",
+      "args": ["web-search"]
+    },
+    "context-docs": {
+      "command": "${bin}",
+      "args": ["docs"]
+    },
+    "context-repomix": {
+      "command": "${bin}",
+      "args": ["repomix"]
+    }
+  }
+}
+JSON
+}
+
+cmd_install() {
+  local target="${1:-}"
+  shift || true
+  case "${target}" in
+    opencode) print_opencode "${1:-}" ;;
+    claude) print_claude "${1:-}" ;;
+    *) fail "usage: context-kit install claude|opencode [--absolute]" ;;
+  esac
+}
+
+cmd_redaction_check() {
+  local bad=0
+  local local_path_terms='/(home|Users)/[^/[:space:]]+|[A-Za-z]:\\Users\\[^\\[:space:]]+'
+  local secret_terms='AKIA[0-9A-Z]{16}|BEGIN (RSA |OPENSSH |EC |DSA )?PRIVATE KEY|xox[baprs]-|sk-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{20,}|gitea_[A-Za-z0-9_-]{20,}'
+
+  # Scan only what would be published: skip .git plus everything .gitignore
+  # excludes by convention (local .env files, caches, logs).
+  local grep_opts=(
+    -RInE
+    --exclude-dir=.git
+    --exclude-dir=.cache
+    --exclude-dir=tmp
+    --exclude=.env
+    --exclude=.env.local
+    --exclude=*.log
+  )
+
+  if grep "${grep_opts[@]}" "${local_path_terms}" "${ROOT}"; then
+    bad=1
+  fi
+  if grep "${grep_opts[@]}" "${secret_terms}" "${ROOT}"; then
+    bad=1
+  fi
+
+  if [[ "${bad}" -eq 0 ]]; then
+    printf 'pass redaction-check found no local absolute paths or common secret patterns\n'
+  else
+    printf 'fail redaction-check found blocked content\n' >&2
+  fi
+  return "${bad}"
+}
+
+case "${1:-}" in
+  start) shift; cmd_start "$@" ;;
+  stop) shift; cmd_stop "$@" ;;
+  restart) shift; cmd_stop; cmd_start "$@" ;;
+  build) shift; cmd_build "$@" ;;
+  status) shift; cmd_status "$@" ;;
+  doctor) shift; cmd_doctor "$@" ;;
+  web-search) shift; cmd_web_search "$@" ;;
+  docs) shift; cmd_docs "$@" ;;
+  repomix) shift; cmd_repomix "$@" ;;
+  install) shift; cmd_install "$@" ;;
+  redaction-check) shift; cmd_redaction_check "$@" ;;
+  -h|--help|help|"") usage ;;
+  *) usage >&2; exit 64 ;;
+esac

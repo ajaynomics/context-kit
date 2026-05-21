@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "context-web-search": {
+      "command": "context-kit",
+      "args": ["web-search"]
+    },
+    "context-docs": {
+      "command": "context-kit",
+      "args": ["docs"]
+    },
+    "context-repomix": {
+      "command": "context-kit",
+      "args": ["repomix"]
+    }
+  }
+}
