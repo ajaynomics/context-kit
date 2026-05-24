@@ -8,10 +8,9 @@
       "timeout": 60000
     },
     "context-docs": {
-      "type": "local",
-      "command": ["context-kit", "docs"],
-      "enabled": true,
-      "timeout": 120000
+      "type": "remote",
+      "url": "http://127.0.0.1:8776/mcp",
+      "enabled": true
     },
     "context-repomix": {
       "type": "local",

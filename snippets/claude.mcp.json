@@ -5,8 +5,8 @@
       "args": ["web-search"]
     },
     "context-docs": {
-      "command": "context-kit",
-      "args": ["docs"]
+      "type": "http",
+      "url": "http://127.0.0.1:8776/mcp"
     },
     "context-repomix": {
       "command": "context-kit",

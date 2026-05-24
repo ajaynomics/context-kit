@@ -56,8 +56,12 @@ config that will not be committed.
 ## Defaults
 
 - SearXNG binds to `127.0.0.1:8099` only.
+- `context-docs` runs as a long-lived service on `127.0.0.1:8776` (Streamable
+  HTTP MCP) so every client shares one indexer and one Chroma writer. The
+  `bin/context-kit docs` stdio command is kept as a compatibility shim for
+  clients that cannot speak HTTP MCP.
 - Docs and model caches live in `$HOME/.local/share/context-kit`.
-- Docs refresh TTL defaults to `7d`.
+- Docs refresh TTL defaults to `24h`.
 - MCP containers are labeled `dev.context-kit=true` for safe inspection and cleanup.
 - Repomix mounts only the current project read-only, not your whole home directory.
 - No code-editing MCP server is enabled by default.

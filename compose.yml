@@ -36,12 +36,35 @@ services:
     build:
       context: ./docker/docs
     image: context-kit/docs-mcp:latest
-    profiles: ["mcp"]
-    stdin_open: true
-    tty: false
+    # Long-lived shared docs MCP. One container = one Chroma writer; clients
+    # connect over Streamable HTTP (mcp-proxy bridges llms-txt-mcp's stdio).
+    container_name: context-kit-docs-mcp
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${CONTEXT_KIT_DOCS_PORT:-8776}:8000"
+    # Run as the host user so bind-mounted /data isn't owned by root.
+    user: "${CONTEXT_KIT_DOCS_UID:-1000}:${CONTEXT_KIT_DOCS_GID:-1000}"
+    environment:
+      HOME: /tmp
+      USER: context-kit
+      LOGNAME: context-kit
+      TORCHINDUCTOR_CACHE_DIR: /tmp/torchinductor
+      DOCS_MCP_TTL: "${CONTEXT_KIT_DOCS_TTL:-24h}"
+      DOCS_MCP_MAX_GET_BYTES: "${CONTEXT_KIT_DOCS_MAX_GET_BYTES:-75000}"
+      DOCS_MCP_EMBED_MODEL: "${CONTEXT_KIT_DOCS_EMBED_MODEL:-BAAI/bge-small-en-v1.5}"
+      # Preindex on startup is off by default; use the docs_refresh tool to
+      # refresh on demand. Set CONTEXT_KIT_DOCS_PREINDEX=1 to restore eager.
+      DOCS_MCP_PREINDEX: "${CONTEXT_KIT_DOCS_PREINDEX:-0}"
     volumes:
       - ${CONTEXT_KIT_DATA_DIR:-${HOME}/.local/share/context-kit}/docs:/data
       - ${CONTEXT_KIT_DATA_DIR:-${HOME}/.local/share/context-kit}/models:/models
+      - ${CONTEXT_KIT_DATA_DIR:-${HOME}/.local/share/context-kit}/docs-sources.txt:/etc/context-kit/docs-sources.txt:ro
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/status', timeout=2).status < 500 else 1)\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     labels:
       dev.context-kit: "true"
 
