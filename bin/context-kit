@@ -41,6 +41,8 @@ DOCS_PORT="${CONTEXT_KIT_DOCS_PORT:-8776}"
 DOCS_HTTP_URL="${CONTEXT_KIT_DOCS_HTTP_URL:-http://127.0.0.1:${DOCS_PORT}/mcp}"
 DOCS_CONTAINER_NAME="context-kit-docs-mcp"
 DOCS_SOURCES_FILE="${DATA_DIR}/docs-sources.txt"
+DOCS_DATA_DIR="${DATA_DIR}/docs"
+MODELS_DATA_DIR="${DATA_DIR}/models"
 
 WEB_SEARCH_IMAGE="${CONTEXT_KIT_WEB_SEARCH_IMAGE:-context-kit/web-search-mcp:latest}"
 DOCS_IMAGE="${CONTEXT_KIT_DOCS_IMAGE:-context-kit/docs-mcp:latest}"
@@ -96,6 +98,35 @@ write_docs_sources_file() {
     resolved_sources
   } > "${tmp}"
   mv "${tmp}" "${DOCS_SOURCES_FILE}"
+}
+
+ensure_writable_dir() {
+  local dir="$1"
+  mkdir -p "${dir}"
+  if [[ ! -w "${dir}" || ! -x "${dir}" ]]; then
+    fail "data directory is not writable by uid $(id -u): ${dir}; fix ownership or set CONTEXT_KIT_DATA_DIR"
+  fi
+}
+
+prepare_data_dirs() {
+  ensure_writable_dir "${DATA_DIR}"
+  ensure_writable_dir "${DOCS_DATA_DIR}"
+  ensure_writable_dir "${MODELS_DATA_DIR}"
+}
+
+check_data_dirs() {
+  local ok=0 dir
+  for dir in "${DATA_DIR}" "${DOCS_DATA_DIR}" "${MODELS_DATA_DIR}"; do
+    if [[ ! -d "${dir}" ]]; then
+      printf 'warn data directory missing: %s (run context-kit start)\n' "${dir}"
+    elif [[ -w "${dir}" && -x "${dir}" ]]; then
+      printf 'pass data directory writable: %s\n' "${dir}"
+    else
+      printf 'fail data directory not writable by uid %s: %s\n' "$(id -u)" "${dir}"
+      ok=1
+    fi
+  done
+  return "${ok}"
 }
 
 warn() {
@@ -204,7 +235,7 @@ cmd_build() {
 
 cmd_start() {
   require_docker
-  mkdir -p "${DATA_DIR}"
+  prepare_data_dirs
   if ! docker image inspect "${WEB_SEARCH_IMAGE}" >/dev/null 2>&1 || ! docker image inspect "${DOCS_IMAGE}" >/dev/null 2>&1; then
     cmd_build
   fi
@@ -252,6 +283,10 @@ cmd_doctor() {
     printf 'pass docker compose available\n'
   else
     printf 'fail docker compose unavailable\n'; ok=1
+  fi
+
+  if ! check_data_dirs; then
+    ok=1
   fi
 
   if docker network inspect "${NETWORK}" >/dev/null 2>&1; then
