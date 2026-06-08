@@ -15,7 +15,8 @@ shell code.
 | `CONTEXT_KIT_COMPOSE_PROJECT` | `context-kit` | Docker Compose project and network prefix |
 | `CONTEXT_KIT_SEARXNG_PORT` | `8099` | Localhost SearXNG port |
 | `CONTEXT_KIT_DOCS_PORT` | `8776` | Localhost port for the long-lived docs-mcp HTTP service |
-| `CONTEXT_KIT_DOCS_HTTP_URL` | `http://127.0.0.1:${CONTEXT_KIT_DOCS_PORT}/mcp` | URL emitted into install snippets and used by the stdio bridge |
+| `CONTEXT_KIT_DOCS_HTTP_URL` | `http://127.0.0.1:${CONTEXT_KIT_DOCS_PORT}/mcp` | URL emitted into HTTP MCP install snippets |
+| `CONTEXT_KIT_DOCS_ALLOW_ORIGIN` | unset | Optional exact browser CORS origin(s) for docs-mcp, separated by spaces |
 | `CONTEXT_KIT_DOCS_TTL` | `24h` | Docs re-fetch cadence |
 | `CONTEXT_KIT_DOCS_SOURCES` | `config/sources.default.txt` | Space-separated source profile files |
 | `CONTEXT_KIT_DOCS_MAX_GET_BYTES` | `75000` | Max bytes returned by docs retrieval |
@@ -42,6 +43,19 @@ CONTEXT_KIT_DOCS_TTL=30d bin/context-kit restart
 The docs-mcp container reads `CONTEXT_KIT_DOCS_TTL` at startup, so changes
 require `bin/context-kit restart`. When freshness matters for one task, prefer
 calling the `docs_refresh` MCP tool instead of lowering the global TTL.
+
+## Browser CORS
+
+`context-docs` disables browser CORS by default. CLI assistants and server-side
+HTTP clients do not need CORS. If a browser-based local client must call the MCP
+endpoint directly, allow only the exact local origin(s) it uses:
+
+```sh
+CONTEXT_KIT_DOCS_ALLOW_ORIGIN="http://127.0.0.1:3000 http://localhost:3000" \
+  bin/context-kit restart
+```
+
+Avoid `*`; the docs MCP is a local unauthenticated endpoint.
 
 ## Source Profiles
 

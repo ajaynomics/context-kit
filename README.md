@@ -60,6 +60,8 @@ config that will not be committed.
   HTTP MCP) so every client shares one indexer and one Chroma writer. The
   `bin/context-kit docs` stdio command is kept as a compatibility shim for
   clients that cannot speak HTTP MCP.
+- `context-docs` browser CORS is disabled by default; set exact local origins
+  only when a browser-based client needs direct access.
 - Docs and model caches live in `$HOME/.local/share/context-kit`.
 - Docs refresh TTL defaults to `24h`.
 - MCP containers are labeled `dev.context-kit=true` for safe inspection and cleanup.

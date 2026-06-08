@@ -343,21 +343,24 @@ cmd_docs() {
   # Prefer the `type: remote` MCP config pointing at ${DOCS_HTTP_URL}.
   # This stdio entrypoint is kept for clients that cannot speak HTTP MCP:
   # it spawns a thin mcp-proxy bridge per call but all calls multiplex onto
-  # the single long-lived docs-mcp container (no Chroma write contention).
+  # the single long-lived docs-mcp container over the Context Kit Docker
+  # network (no Chroma write contention, no host networking).
   require_docker
+  require_network
   require_image "${DOCS_IMAGE}" "context-kit build"
 
   if ! docker ps --filter "name=^${DOCS_CONTAINER_NAME}$" --filter "status=running" --format '{{.Names}}' | grep -qx "${DOCS_CONTAINER_NAME}"; then
     fail "long-lived docs-mcp not running; start it with: context-kit start"
   fi
 
+  local bridge_url="http://${DOCS_CONTAINER_NAME}:8000/mcp"
   exec docker run --rm -i \
     --label dev.context-kit=true \
-    --network host \
+    --network "${NETWORK}" \
     --entrypoint mcp-proxy \
     "${DOCS_IMAGE}" \
     --transport streamablehttp \
-    "${DOCS_HTTP_URL}"
+    "${bridge_url}"
 }
 
 cmd_repomix() {

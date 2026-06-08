@@ -37,12 +37,17 @@ if [ "${DOCS_MCP_PREINDEX:-0}" = "1" ]; then
   preindex_flag=""
 fi
 
-# shellcheck disable=SC2086  # intentional word-splitting on $sources / $preindex_flag
+allow_origin_args=""
+if [ -n "${DOCS_MCP_ALLOW_ORIGIN:-}" ]; then
+  allow_origin_args="--allow-origin ${DOCS_MCP_ALLOW_ORIGIN}"
+fi
+
+# shellcheck disable=SC2086  # intentional word-splitting on $sources / $preindex_flag / $allow_origin_args
 exec mcp-proxy \
   --host "${DOCS_MCP_HTTP_HOST:-0.0.0.0}" \
   --port "${DOCS_MCP_HTTP_PORT:-8000}" \
   --pass-environment \
-  --allow-origin "${DOCS_MCP_ALLOW_ORIGIN:-*}" \
+  $allow_origin_args \
   -- \
   llms-txt-mcp \
     --store-path /data \

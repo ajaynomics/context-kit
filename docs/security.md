@@ -33,3 +33,12 @@ their mount paths and permissions separately.
 
 Do not expose SearXNG or MCP servers to the public internet without a separate
 review. The default setup is for localhost development.
+
+The containers may bind to `0.0.0.0` internally, but the Compose file publishes
+SearXNG and docs-mcp only on `127.0.0.1`. If you run the images outside the
+provided Compose file, review port publishing, SearXNG's limiter/secret, and MCP
+authentication separately.
+
+Browser CORS for `context-docs` is disabled by default. Only set
+`CONTEXT_KIT_DOCS_ALLOW_ORIGIN` for exact local origins that need direct browser
+access; avoid wildcard origins for unauthenticated local MCP endpoints.
