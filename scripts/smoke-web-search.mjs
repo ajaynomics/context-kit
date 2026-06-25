@@ -17,13 +17,29 @@ let nextId = 1;
 const pending = new Map();
 let stdoutBuffer = "";
 let stderrBuffer = "";
+let childExited = false;
+
+child.once("exit", () => {
+  childExited = true;
+});
 
 function stopChild() {
-  child.stdin.end();
-  child.kill("SIGTERM");
-  const killTimer = setTimeout(() => child.kill("SIGKILL"), 3000);
   return new Promise(resolve => {
+    if (childExited) {
+      resolve();
+      return;
+    }
+
+    child.stdin.end();
+    const termTimer = setTimeout(() => {
+      if (!childExited) child.kill("SIGTERM");
+    }, 3000);
+    const killTimer = setTimeout(() => {
+      if (!childExited) child.kill("SIGKILL");
+    }, 6000);
+
     child.once("exit", () => {
+      clearTimeout(termTimer);
       clearTimeout(killTimer);
       resolve();
     });
