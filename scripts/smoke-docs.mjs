@@ -7,10 +7,10 @@ const command = process.argv[2];
 const args = process.argv.slice(3);
 
 if (!command) {
-  throw new Error("usage: node scripts/smoke-web-search.mjs <command> [args...]");
+  throw new Error("usage: node scripts/smoke-docs.mjs <command> [args...]");
 }
 
-const tmpDir = mkdtempSync(join(tmpdir(), "context-kit-web-search-smoke-"));
+const tmpDir = mkdtempSync(join(tmpdir(), "context-kit-docs-smoke-"));
 const cidFile = join(tmpDir, "container.cid");
 
 const child = spawn(command, args, {
@@ -74,9 +74,9 @@ function stopContainer() {
 
 const timeout = setTimeout(async () => {
   await stopChild();
-  console.error(`MCP smoke timed out. stderr: ${stderrBuffer.slice(-2000)}`);
+  console.error(`Docs MCP smoke timed out. stderr: ${stderrBuffer.slice(-2000)}`);
   process.exit(1);
-}, 120000);
+}, 300000);
 
 child.stderr.on("data", chunk => {
   stderrBuffer += chunk.toString();
@@ -117,13 +117,6 @@ function notify(method, params = {}) {
   child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method, params })}\n`);
 }
 
-function textFrom(result) {
-  return (result.content || [])
-    .filter(part => part.type === "text")
-    .map(part => part.text)
-    .join("\n");
-}
-
 async function callTool(name, args = {}) {
   return request("tools/call", { name, arguments: args });
 }
@@ -132,61 +125,41 @@ try {
   await request("initialize", {
     protocolVersion: "2024-11-05",
     capabilities: {},
-    clientInfo: { name: "context-kit-smoke", version: "0.0.0" }
+    clientInfo: { name: "context-kit-docs-smoke", version: "0.0.0" }
   });
   notify("notifications/initialized");
 
   const listed = await request("tools/list");
   const toolNames = new Set((listed.tools || []).map(tool => tool.name));
-  for (const name of ["search_web", "fetch_url"]) {
+  for (const name of ["docs_query", "docs_sources"]) {
     if (!toolNames.has(name)) throw new Error(`missing tool: ${name}`);
   }
 
-  const searxng = textFrom(await callTool("search_web", {
-    q: "Model Context Protocol",
-    limit: 2,
-    provider: "searxng"
-  }));
-  if (!searxng.includes("Model")) throw new Error(`SearXNG smoke returned unexpected text: ${searxng.slice(0, 500)}`);
+  const sources = await callTool("docs_sources");
+  const sourcesText = JSON.stringify(sources);
+  if (sources.isError) {
+    throw new Error(`docs_sources returned an error: ${sourcesText.slice(0, 500)}`);
+  }
 
-  const bing = textFrom(await callTool("search_web", {
-    q: "Model Context Protocol",
-    limit: 2,
-    provider: "bing"
-  }));
-  if (!bing.includes("Model")) throw new Error(`Bing smoke returned unexpected text: ${bing.slice(0, 500)}`);
-
-  const fetch = textFrom(await callTool("fetch_url", {
-    url: "https://example.com/",
-    format: "markdown",
-    max_download_bytes: 52428800
-  }));
-  if (!fetch.includes("Example Domain")) throw new Error(`fetch smoke returned unexpected text: ${fetch.slice(0, 500)}`);
-
-  const browserFetch = textFrom(await callTool("fetch_url", {
-    url: "https://example.com/",
-    format: "markdown",
-    engine: "browser",
-    max_download_bytes: 52428800
-  }));
-  if (!browserFetch.includes("Example Domain")) throw new Error(`browser fetch smoke returned unexpected text: ${browserFetch.slice(0, 500)}`);
-
-  const localResult = await callTool("fetch_url", {
-    url: "http://127.0.0.1:1/",
-    max_download_bytes: 52428800
+  const query = await callTool("docs_query", {
+    query: "Model Context Protocol documentation",
+    limit: 3,
+    auto_retrieve: true,
+    auto_retrieve_threshold: 0.1,
+    auto_retrieve_limit: 1,
+    max_bytes: 12000
   });
-  const localBlocked = Boolean(localResult.isError) && textFrom(localResult).includes("Blocked localhost/private URL");
-  if (!localBlocked) throw new Error("localhost/private URL was not blocked as expected");
+  const queryText = JSON.stringify(query);
+  if (!queryText.includes("search_results") && !queryText.includes("Model Context Protocol")) {
+    throw new Error(`docs_query returned unexpected payload: ${queryText.slice(0, 500)}`);
+  }
 
   clearTimeout(timeout);
   await stopChild();
   console.log(JSON.stringify({
     tools: Array.from(toolNames).sort(),
-    searxng: "pass",
-    bing: "pass",
-    fetch_url: "pass",
-    fetch_url_browser_engine_currently_http: "pass",
-    localhost_guard: "pass"
+    docs_sources: "pass",
+    docs_query: "pass"
   }, null, 2));
 } catch (error) {
   clearTimeout(timeout);

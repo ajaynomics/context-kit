@@ -17,17 +17,34 @@ check_node() {
   done
 }
 
-git diff --check
+assert_redaction_check_does_not_disclose_matches() {
+  local fixture="${tmp_dir}/redaction-fixture.txt"
+  local output="${tmp_dir}/redaction-output.txt"
+  local blocked_path="/data/proj""ects/context-kit-private-fixture"
+  printf 'blocked=%s\n' "${blocked_path}" > "${fixture}"
+  if bin/context-kit redaction-check "${fixture}" >"${output}" 2>&1; then
+    printf 'redaction-check test unexpectedly passed\n' >&2
+    return 1
+  fi
+  if grep -F "${blocked_path}" "${output}" >/dev/null; then
+    printf 'redaction-check disclosed matched content\n' >&2
+    return 1
+  fi
+}
+
+git diff --check HEAD
+git show --check --format= HEAD >/dev/null
 git ls-files --cached --error-unmatch \
   docker/web-search/patch-mcp-web-search.mjs \
   docker/web-search/overrides/bing.js \
   docker/docs/constraints.txt \
   scripts/smoke-web-search.mjs \
+  scripts/smoke-docs.mjs \
   scripts/release-check >/dev/null
 bash -n bin/context-kit
 bash -n scripts/release-check
 sh -n docker/docs/entrypoint.sh
-check_node docker/web-search/patch-mcp-web-search.mjs docker/web-search/overrides/bing.js scripts/smoke-web-search.mjs
+check_node docker/web-search/patch-mcp-web-search.mjs docker/web-search/overrides/bing.js scripts/smoke-web-search.mjs scripts/smoke-docs.mjs
 
 node -e 'const fs=require("node:fs"); JSON.parse(fs.readFileSync("snippets/opencode.json", "utf8")); JSON.parse(fs.readFileSync("snippets/claude.mcp.json", "utf8"));'
 bin/context-kit install opencode > "${tmp_dir}/opencode.json"
@@ -39,11 +56,20 @@ node -e 'const fs=require("node:fs"); for (const file of process.argv.slice(1)) 
   "${tmp_dir}/opencode-absolute.json" \
   "${tmp_dir}/claude.json" \
   "${tmp_dir}/claude-absolute.json"
+bin/context-kit redaction-check "${tmp_dir}/opencode.json" "${tmp_dir}/claude.json"
+assert_redaction_check_does_not_disclose_matches
 
 bin/context-kit redaction-check
 docker compose -p context-kit -f compose.yml config >/dev/null
+if env -u HOME docker compose --env-file /dev/null -p context-kit-release-home-check -f compose.yml config >"${tmp_dir}/compose-no-home.out" 2>"${tmp_dir}/compose-no-home.err"; then
+  printf 'compose config unexpectedly succeeded without HOME or CONTEXT_KIT_DATA_DIR\n' >&2
+  exit 1
+fi
+CONTEXT_KIT_DATA_DIR="${tmp_dir}/compose-data" env -u HOME docker compose --env-file /dev/null -p context-kit-release-home-check -f compose.yml config >/dev/null
 bin/context-kit build
+bin/context-kit restart
 bin/context-kit doctor
 node scripts/smoke-web-search.mjs bin/context-kit web-search
+node scripts/smoke-docs.mjs bin/context-kit docs
 
 printf 'pass release-check\n'

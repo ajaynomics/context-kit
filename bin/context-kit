@@ -42,9 +42,10 @@ fail() {
 
 load_env_file
 
+DEFAULT_DATA_DIR="${HOME:-${PWD}}/.local/share/context-kit"
 PROJECT="${CONTEXT_KIT_COMPOSE_PROJECT:-context-kit}"
 COMPOSE_FILE="${ROOT}/compose.yml"
-DATA_DIR="${CONTEXT_KIT_DATA_DIR:-${HOME}/.local/share/context-kit}"
+DATA_DIR="${CONTEXT_KIT_DATA_DIR:-${DEFAULT_DATA_DIR}}"
 NETWORK="${CONTEXT_KIT_DOCKER_NETWORK:-${PROJECT}_default}"
 SEARXNG_PORT="${CONTEXT_KIT_SEARXNG_PORT:-8099}"
 DOCS_PORT="${CONTEXT_KIT_DOCS_PORT:-8776}"
@@ -190,6 +191,17 @@ warn() {
   printf 'warn: %s\n' "$*" >&2
 }
 
+print_relative_paths() {
+  local path
+  while IFS= read -r path; do
+    [[ -n "${path}" ]] || continue
+    if [[ "${path}" == "${ROOT}/"* ]]; then
+      path="${path#"${ROOT}/"}"
+    fi
+    printf '%s\n' "${path}"
+  done
+}
+
 json_escape() {
   local s="$1"
   s="${s//\\/\\\\}"
@@ -314,8 +326,9 @@ cmd_status() {
   printf '\nImages\n'
   docker image ls --format '{{.Repository}}:{{.Tag}}\t{{.Size}}' \
     | grep -E '^(context-kit/|ghcr.io/yamadashy/repomix:)' || true
-  printf '\nLabeled containers\n'
-  docker ps -a --filter label=dev.context-kit=true --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
+  printf '\nActive per-call MCP containers\n'
+  docker ps -a --filter label=dev.context-kit=true --format '{{.Names}}\t{{.Status}}\t{{.Image}}\t{{.Command}}' \
+    | awk 'BEGIN { print "NAMES\tSTATUS\tIMAGE\tCOMMAND" } $1 !~ /^context-kit-(docs-mcp|searxng-1)$/ { print }'
   printf '\nDocs MCP endpoint\n- %s (container: %s)\n' "${DOCS_HTTP_URL}" "${DOCS_CONTAINER_NAME}"
   printf '\nDocs sources\n'
   resolved_sources | sed 's/^/- /'
@@ -387,13 +400,15 @@ cmd_doctor() {
   if command -v curl >/dev/null 2>&1 && curl -fsS "http://127.0.0.1:${SEARXNG_PORT}/healthz" >/dev/null 2>&1; then
     printf 'pass SearXNG responds on 127.0.0.1:%s\n' "${SEARXNG_PORT}"
   else
-    printf 'warn SearXNG not responding on 127.0.0.1:%s\n' "${SEARXNG_PORT}"
+    printf 'fail SearXNG not responding on 127.0.0.1:%s\n' "${SEARXNG_PORT}"
+    ok=1
   fi
 
   if command -v curl >/dev/null 2>&1 && curl -fsS -o /dev/null "http://127.0.0.1:${DOCS_PORT}/status" 2>/dev/null; then
     printf 'pass docs-mcp HTTP responds on 127.0.0.1:%s\n' "${DOCS_PORT}"
   else
-    printf 'warn docs-mcp HTTP not responding on 127.0.0.1:%s (run context-kit start)\n' "${DOCS_PORT}"
+    printf 'fail docs-mcp HTTP not responding on 127.0.0.1:%s (run context-kit start)\n' "${DOCS_PORT}"
+    ok=1
   fi
 
   if [[ "$(resolved_sources | wc -l | tr -d ' ')" -gt 0 ]]; then
@@ -409,8 +424,13 @@ cmd_web_search() {
   require_docker
   require_network
   require_image "${WEB_SEARCH_IMAGE}" "context-kit build"
+  local cidfile_args=()
+  if [[ -n "${CONTEXT_KIT_DOCKER_CIDFILE:-}" ]]; then
+    cidfile_args=(--cidfile "${CONTEXT_KIT_DOCKER_CIDFILE}")
+  fi
   exec docker run --rm -i \
     --label dev.context-kit=true \
+    "${cidfile_args[@]}" \
     --network "${NETWORK}" \
     -e DEFAULT_SEARCH_PROVIDER="${WEB_SEARCH_PROVIDER}" \
     -e SEARXNG_URL="${SEARXNG_URL:-http://searxng:8080}" \
@@ -438,8 +458,13 @@ cmd_docs() {
   fi
 
   local bridge_url="http://${DOCS_CONTAINER_NAME}:8000/mcp"
+  local cidfile_args=()
+  if [[ -n "${CONTEXT_KIT_DOCKER_CIDFILE:-}" ]]; then
+    cidfile_args=(--cidfile "${CONTEXT_KIT_DOCKER_CIDFILE}")
+  fi
   exec docker run --rm -i \
     --label dev.context-kit=true \
+    "${cidfile_args[@]}" \
     --network "${NETWORK}" \
     --entrypoint mcp-proxy \
     "${DOCS_IMAGE}" \
@@ -454,8 +479,13 @@ cmd_repomix() {
   dir="$(project_dir)"
   mount_dir="${CONTEXT_KIT_REPOMIX_MOUNT_DIR:-${dir}}"
   mount_dir="$(cd "${mount_dir}" && pwd -P)"
+  local cidfile_args=()
+  if [[ -n "${CONTEXT_KIT_DOCKER_CIDFILE:-}" ]]; then
+    cidfile_args=(--cidfile "${CONTEXT_KIT_DOCKER_CIDFILE}")
+  fi
   exec docker run --rm -i \
     --label dev.context-kit=true \
+    "${cidfile_args[@]}" \
     -v "${mount_dir}:${mount_dir}:ro" \
     --workdir "${dir}" \
     "${REPOMIX_IMAGE}" --mcp
@@ -536,6 +566,10 @@ cmd_install() {
 
 cmd_redaction_check() {
   local bad=0
+  local scan_paths=("${ROOT}")
+  if [[ "$#" -gt 0 ]]; then
+    scan_paths=("$@")
+  fi
   local local_path_terms='/(home|Users)/[^/[:space:]]+|/data/(projects|opencode-mcp)[^[:space:]]*|[A-Za-z]:\\Users\\[^\\[:space:]]+'
   local secret_terms='AKIA[0-9A-Z]{16}|BEGIN (RSA |OPENSSH |EC |DSA )?PRIVATE KEY|xox[baprs]-|sk-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{20,}|gitea_[A-Za-z0-9_-]{20,}'
 
@@ -551,10 +585,18 @@ cmd_redaction_check() {
     --exclude=*.log
   )
 
-  if grep "${grep_opts[@]}" "${local_path_terms}" "${ROOT}"; then
+  local matches
+  matches="$(grep "${grep_opts[@]}" --files-with-matches "${local_path_terms}" "${scan_paths[@]}" 2>/dev/null || true)"
+  if [[ -n "${matches}" ]]; then
+    printf 'fail redaction-check found local path patterns in:\n' >&2
+    printf '%s\n' "${matches}" | print_relative_paths | sed 's/^/- /' >&2
     bad=1
   fi
-  if grep "${grep_opts[@]}" "${secret_terms}" "${ROOT}"; then
+
+  matches="$(grep "${grep_opts[@]}" --files-with-matches "${secret_terms}" "${scan_paths[@]}" 2>/dev/null || true)"
+  if [[ -n "${matches}" ]]; then
+    printf 'fail redaction-check found secret-like patterns in:\n' >&2
+    printf '%s\n' "${matches}" | print_relative_paths | sed 's/^/- /' >&2
     bad=1
   fi
 

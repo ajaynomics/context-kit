@@ -62,10 +62,10 @@ services:
       # refresh on demand. Set CONTEXT_KIT_DOCS_PREINDEX=1 to restore eager.
       DOCS_MCP_PREINDEX: "${CONTEXT_KIT_DOCS_PREINDEX:-0}"
     volumes:
-      - ${CONTEXT_KIT_DATA_DIR:-${HOME}/.local/share/context-kit}/docs:/data
-      - ${CONTEXT_KIT_DATA_DIR:-${HOME}/.local/share/context-kit}/models:/models
-      - ${CONTEXT_KIT_DATA_DIR:-${HOME}/.local/share/context-kit}/docs-sources.txt:/etc/context-kit/docs-sources.txt:ro
-      - ${CONTEXT_KIT_DOCS_LOCAL_SOURCES_DIR:-${CONTEXT_KIT_DATA_DIR:-${HOME}/.local/share/context-kit}/local-sources}:/etc/context-kit/local-sources:ro
+      - ${CONTEXT_KIT_DATA_DIR:-${HOME:?Set HOME or CONTEXT_KIT_DATA_DIR, or run bin/context-kit instead}/.local/share/context-kit}/docs:/data
+      - ${CONTEXT_KIT_DATA_DIR:-${HOME:?Set HOME or CONTEXT_KIT_DATA_DIR, or run bin/context-kit instead}/.local/share/context-kit}/models:/models
+      - ${CONTEXT_KIT_DATA_DIR:-${HOME:?Set HOME or CONTEXT_KIT_DATA_DIR, or run bin/context-kit instead}/.local/share/context-kit}/docs-sources.txt:/etc/context-kit/docs-sources.txt:ro
+      - ${CONTEXT_KIT_DOCS_LOCAL_SOURCES_DIR:-${CONTEXT_KIT_DATA_DIR:-${HOME:?Set HOME or CONTEXT_KIT_DATA_DIR, or run bin/context-kit instead}/.local/share/context-kit}/local-sources}:/etc/context-kit/local-sources:ro
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/status', timeout=2).status < 500 else 1)\""]
       interval: 30s

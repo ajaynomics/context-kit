@@ -21,13 +21,23 @@ if [ ! -r "$sources_file" ]; then
   exit 64
 fi
 
-# Strip comments and blank lines, then collapse whitespace into a flat list.
-sources=$(grep -vE '^[[:space:]]*(#|$)' "$sources_file" | tr -s '[:space:]' '\n' | grep -v '^$' || true)
+# Strip inline comments and blank lines, then collapse whitespace into a flat list.
+sources=$(sed 's/#.*//' "$sources_file" | tr -s '[:space:]' '\n' | grep -v '^$' || true)
 
 if [ -z "$sources" ]; then
   echo "docs-mcp: no sources found in $sources_file after stripping comments/blanks" >&2
   exit 64
 fi
+
+for source_url in $sources; do
+  case "$source_url" in
+    */llms.txt|*/llms-full.txt) ;;
+    *)
+      echo "docs-mcp: source URL must end with /llms.txt or /llms-full.txt: $source_url" >&2
+      exit 64
+      ;;
+  esac
+done
 
 if [ -d "$local_sources_dir" ]; then
   python -m http.server "$local_sources_port" \

@@ -78,5 +78,6 @@ Each source file is plain text. Blank lines and `#` comments are ignored.
 Entries may be absolute source-profile paths for private machine-local config.
 For local llms.txt files, place content under
 `CONTEXT_KIT_DOCS_LOCAL_SOURCES_DIR` and reference it as
-`http://127.0.0.1:8769/path/inside/local-sources.txt`; that loopback URL is
-inside the docs-mcp container, not exposed on the host.
+`http://127.0.0.1:8769/path/inside/local-sources/llms.txt` or another URL that
+ends in `/llms.txt` or `/llms-full.txt`; that loopback URL is inside the docs-mcp
+container, not exposed on the host.
