@@ -33,6 +33,37 @@ Build default images:
 bin/context-kit build
 ```
 
+## Fetch URL Says Max Download Bytes Is Too Big
+
+If `fetch_url` fails before making a network request with an MCP validation error
+like `Number must be less than or equal to 26214400`, rebuild the web-search MCP
+image:
+
+```sh
+bin/context-kit build
+```
+
+Context Kit patches the upstream `mcp-web-search` schema so the accepted
+`max_download_bytes` value matches `CONTEXT_KIT_WEB_SEARCH_MAX_BYTES`, which
+defaults to `52428800`.
+
+## Search Fallback and Chromium
+
+`search_web` defaults to SearXNG. If SearXNG fails or returns no results, the
+upstream fallback order is DuckDuckGo, then Bing. Bing uses Chromium through
+Puppeteer, so `bin/context-kit doctor` checks that the configured Chromium path
+exists inside the web-search image.
+
+Context Kit carries a source-controlled Bing provider override in
+`docker/web-search/overrides/bing.js` because the upstream 1.3.0 provider can
+race result rendering and return no items even when Chromium sees Bing result
+cards. The override waits for result cards and decodes current Bing redirect
+URLs before handing results back to the upstream fallback registry.
+
+`fetch_url` is different: in upstream `mcp-web-search` 1.3.0, `engine=browser` is
+accepted but reserved for future support. It does not currently invoke Chromium;
+URL fetching uses the HTTP extractor path.
+
 ## Docs Indexing Is Slow
 
 The first run downloads an embedding model and embeds every configured docs

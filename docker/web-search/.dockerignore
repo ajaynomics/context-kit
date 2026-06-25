@@ -1,2 +1,5 @@
 *
 !Dockerfile
+!patch-mcp-web-search.mjs
+!overrides/
+!overrides/bing.js

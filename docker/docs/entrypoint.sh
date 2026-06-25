@@ -12,6 +12,8 @@
 set -eu
 
 sources_file="${DOCS_MCP_SOURCES_FILE:-/etc/context-kit/docs-sources.txt}"
+local_sources_dir="${DOCS_MCP_LOCAL_SOURCES_DIR:-/etc/context-kit/local-sources}"
+local_sources_port="${DOCS_MCP_LOCAL_SOURCES_PORT:-8769}"
 
 if [ ! -r "$sources_file" ]; then
   echo "docs-mcp: sources file not readable: $sources_file" >&2
@@ -27,11 +29,41 @@ if [ -z "$sources" ]; then
   exit 64
 fi
 
+if [ -d "$local_sources_dir" ]; then
+  python -m http.server "$local_sources_port" \
+    --bind 127.0.0.1 \
+    --directory "$local_sources_dir" \
+    >/tmp/context-kit-local-sources.log 2>&1 &
+  local_sources_pid="$!"
+  if ! python - "$local_sources_port" <<'PY'
+import sys
+import time
+import urllib.request
+
+port = sys.argv[1]
+last_error = None
+for _ in range(20):
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=0.5) as response:
+            if response.status < 500:
+                raise SystemExit(0)
+    except Exception as error:
+        last_error = error
+        time.sleep(0.1)
+raise SystemExit(f"local source server did not become ready: {last_error}")
+PY
+  then
+    kill "$local_sources_pid" 2>/dev/null || true
+    echo "docs-mcp: local source server failed on 127.0.0.1:$local_sources_port" >&2
+    exit 65
+  fi
+fi
+
 # By default llms-txt-mcp 0.2.0 re-embeds every source on launch (the actual
 # default is a background preindex, --no-preindex only disables the foreground
-# variant). On a long-lived container that just wastes ~5 min of CPU per
-# restart, so we disable BOTH and let the caller use `docs_refresh` on demand.
-# Set DOCS_MCP_PREINDEX=1 to restore the eager behavior.
+# variant). On a long-lived container that wastes CPU per restart, so we disable
+# BOTH. Missing/stale sources still refresh on first docs_query/docs_refresh.
+# Set DOCS_MCP_PREINDEX=1 to restore eager startup indexing.
 preindex_flag="--no-preindex --no-background-preindex"
 if [ "${DOCS_MCP_PREINDEX:-0}" = "1" ]; then
   preindex_flag=""

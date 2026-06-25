@@ -10,7 +10,7 @@ Context Kit gives coding agents three local MCP servers:
 
 | Server | Purpose | Default |
 |---|---|---|
-| `context-web-search` | Current web search and URL fetch through local SearXNG | Enabled |
+| `context-web-search` | Current web search through local SearXNG plus URL fetch/extract | Enabled |
 | `context-docs` | Semantic search over curated `llms.txt` documentation | Enabled |
 | `context-repomix` | Pack local or remote repositories into AI-friendly context | Enabled |
 
@@ -56,6 +56,10 @@ config that will not be committed.
 ## Defaults
 
 - SearXNG binds to `127.0.0.1:8099` only.
+- `context-web-search` defaults `search_web` to SearXNG, then falls back to
+  DuckDuckGo and Bing. Bing uses Chromium inside the web-search image.
+- `fetch_url` uses upstream HTTP extraction. In `mcp-web-search` 1.3.0,
+  `engine=browser` is accepted but does not invoke Chromium yet.
 - `context-docs` runs as a long-lived service on `127.0.0.1:8776` (Streamable
   HTTP MCP) so every client shares one indexer and one Chroma writer. The
   `bin/context-kit docs` stdio command is kept as a compatibility shim for
@@ -74,7 +78,6 @@ The default docs index is intentionally small:
 
 - Claude Code docs
 - OpenAI API docs and reference
-- Anthropic docs
 - OpenRouter docs
 - Model Context Protocol docs
 
@@ -91,8 +94,8 @@ CONTEXT_KIT_DOCS_SOURCES="config/sources.default.txt config/sources.js.txt" \
   bin/context-kit docs
 ```
 
-Cloudflare is opt-in because it can expand to thousands of sections and take a
-while to embed.
+Large vendor feeds are opt-in because they can expand to thousands of sections
+and take a while to embed.
 
 ## Commands
 

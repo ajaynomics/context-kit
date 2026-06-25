@@ -9,7 +9,6 @@ services:
     environment:
       BASE_URL: "http://127.0.0.1:${CONTEXT_KIT_SEARXNG_PORT:-8099}/"
       INSTANCE_NAME: "context-kit-search"
-      SEARXNG_SECRET: "${CONTEXT_KIT_SEARXNG_SECRET:-change-me-local-only}"
     volumes:
       - ./docker/web-search/searxng/settings.yml:/etc/searxng/settings.yml:ro
       - searxng-cache:/var/cache/searxng
@@ -19,16 +18,21 @@ services:
   web-search-mcp:
     build:
       context: ./docker/web-search
+      args:
+        MCP_WEB_SEARCH_MAX_BYTES: "${CONTEXT_KIT_WEB_SEARCH_MAX_BYTES:-52428800}"
     image: context-kit/web-search-mcp:latest
     profiles: ["mcp"]
     stdin_open: true
     tty: false
     environment:
-      DEFAULT_SEARCH_PROVIDER: "searxng"
+      DEFAULT_SEARCH_PROVIDER: "${CONTEXT_KIT_WEB_SEARCH_PROVIDER:-searxng}"
       SEARXNG_URL: "http://searxng:8080"
-      CHROME_PATH: "/usr/bin/chromium"
-      HTTP_TIMEOUT: "15000"
-      MAX_RESULTS: "10"
+      CHROME_PATH: "${CONTEXT_KIT_WEB_SEARCH_CHROME_PATH:-/usr/bin/chromium}"
+      HTTP_TIMEOUT: "${CONTEXT_KIT_WEB_SEARCH_HTTP_TIMEOUT:-15000}"
+      MAX_BYTES: "${CONTEXT_KIT_WEB_SEARCH_MAX_BYTES:-52428800}"
+      MAX_RESULTS: "${CONTEXT_KIT_WEB_SEARCH_MAX_RESULTS:-10}"
+      BROWSER_SEARCH_USER_AGENT: "${CONTEXT_KIT_WEB_SEARCH_BROWSER_USER_AGENT:-}"
+      MCP_COMPAT_MODE: "${CONTEXT_KIT_WEB_SEARCH_MCP_COMPAT_MODE:-}"
     labels:
       dev.context-kit: "true"
 
@@ -53,6 +57,7 @@ services:
       DOCS_MCP_MAX_GET_BYTES: "${CONTEXT_KIT_DOCS_MAX_GET_BYTES:-75000}"
       DOCS_MCP_EMBED_MODEL: "${CONTEXT_KIT_DOCS_EMBED_MODEL:-BAAI/bge-small-en-v1.5}"
       DOCS_MCP_ALLOW_ORIGIN: "${CONTEXT_KIT_DOCS_ALLOW_ORIGIN:-}"
+      DOCS_MCP_LOCAL_SOURCES_PORT: "${CONTEXT_KIT_DOCS_LOCAL_SOURCES_PORT:-8769}"
       # Preindex on startup is off by default; use the docs_refresh tool to
       # refresh on demand. Set CONTEXT_KIT_DOCS_PREINDEX=1 to restore eager.
       DOCS_MCP_PREINDEX: "${CONTEXT_KIT_DOCS_PREINDEX:-0}"
@@ -60,6 +65,7 @@ services:
       - ${CONTEXT_KIT_DATA_DIR:-${HOME}/.local/share/context-kit}/docs:/data
       - ${CONTEXT_KIT_DATA_DIR:-${HOME}/.local/share/context-kit}/models:/models
       - ${CONTEXT_KIT_DATA_DIR:-${HOME}/.local/share/context-kit}/docs-sources.txt:/etc/context-kit/docs-sources.txt:ro
+      - ${CONTEXT_KIT_DOCS_LOCAL_SOURCES_DIR:-${CONTEXT_KIT_DATA_DIR:-${HOME}/.local/share/context-kit}/local-sources}:/etc/context-kit/local-sources:ro
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/status', timeout=2).status < 500 else 1)\""]
       interval: 30s

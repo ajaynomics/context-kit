@@ -15,8 +15,8 @@ search:
     - json
 
 server:
-  # Local placeholder. The Docker service also sets SEARXNG_SECRET from .env;
-  # keep SearXNG bound to 127.0.0.1 unless you review this config separately.
+  # Local placeholder. Keep SearXNG bound to 127.0.0.1 unless you review this
+  # config and replace the secret_key for a deliberate non-local deployment.
   secret_key: "local-only-change-if-exposed"
   limiter: false
   image_proxy: true
