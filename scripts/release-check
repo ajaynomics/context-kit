@@ -5,7 +5,29 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT}"
 
 tmp_dir="$(mktemp -d)"
+pick_port() {
+  python - <<'PY'
+import socket
+
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+    sock.bind(("127.0.0.1", 0))
+    print(sock.getsockname()[1])
+PY
+}
+
+release_id="release-$$"
+export CONTEXT_KIT_COMPOSE_PROJECT="context-kit-${release_id}"
+export CONTEXT_KIT_DATA_DIR="${tmp_dir}/data"
+export CONTEXT_KIT_SEARXNG_PORT="$(pick_port)"
+export CONTEXT_KIT_DOCS_PORT="$(pick_port)"
+export CONTEXT_KIT_DOCS_SOURCES="config/sources.default.txt"
+export CONTEXT_KIT_DOCS_LOCAL_SOURCES_DIR="${tmp_dir}/local-sources"
+export CONTEXT_KIT_WEB_SEARCH_IMAGE="context-kit/web-search-mcp:${release_id}"
+export CONTEXT_KIT_DOCS_IMAGE="context-kit/docs-mcp:${release_id}"
+
 cleanup() {
+  docker compose -p "${CONTEXT_KIT_COMPOSE_PROJECT}" -f compose.yml down -v --remove-orphans >/dev/null 2>&1 || true
+  docker image rm "${CONTEXT_KIT_WEB_SEARCH_IMAGE}" "${CONTEXT_KIT_DOCS_IMAGE}" >/dev/null 2>&1 || true
   rm -rf "${tmp_dir}"
 }
 trap cleanup EXIT
@@ -32,19 +54,47 @@ assert_redaction_check_does_not_disclose_matches() {
   fi
 }
 
+assert_web_search_image() {
+  docker run --rm --entrypoint node \
+    -e EXPECTED_MAX_BYTES="${CONTEXT_KIT_WEB_SEARCH_MAX_BYTES:-52428800}" \
+    "${CONTEXT_KIT_WEB_SEARCH_IMAGE}" \
+    -e '
+const fs = require("node:fs");
+const expected = Number(process.env.EXPECTED_MAX_BYTES) || 0;
+const actual = Number(process.env.MAX_BYTES) || 0;
+if (process.getuid && process.getuid() === 0) process.exit(1);
+if (actual !== expected) process.exit(1);
+
+const serverPath = "/usr/local/lib/node_modules/@zhafron/mcp-web-search/dist/src/server.js";
+const server = fs.readFileSync(serverPath, "utf8");
+if (!server.includes("max_download_bytes: z.number().int().min(1).max(MAX_BYTES).optional()")) process.exit(1);
+
+const bingPath = "/usr/local/lib/node_modules/@zhafron/mcp-web-search/dist/src/providers/bing.js";
+const bing = fs.readFileSync(bingPath, "utf8");
+if (!bing.includes("Context Kit override for @zhafron/mcp-web-search 1.3.0")) process.exit(1);
+if (!bing.includes("waitForSelector")) process.exit(1);
+if (!bing.includes("decodeBingRedirect")) process.exit(1);
+' >/dev/null
+
+  docker run --rm --entrypoint /usr/bin/test \
+    "${CONTEXT_KIT_WEB_SEARCH_IMAGE}" \
+    -x "${CONTEXT_KIT_WEB_SEARCH_CHROME_PATH:-/usr/bin/chromium}"
+}
+
 git diff --check HEAD
 git show --check --format= HEAD >/dev/null
 git ls-files --cached --error-unmatch \
   docker/web-search/patch-mcp-web-search.mjs \
   docker/web-search/overrides/bing.js \
   docker/docs/constraints.txt \
+  scripts/mcp-smoke-client.mjs \
   scripts/smoke-web-search.mjs \
   scripts/smoke-docs.mjs \
   scripts/release-check >/dev/null
 bash -n bin/context-kit
 bash -n scripts/release-check
 sh -n docker/docs/entrypoint.sh
-check_node docker/web-search/patch-mcp-web-search.mjs docker/web-search/overrides/bing.js scripts/smoke-web-search.mjs scripts/smoke-docs.mjs
+check_node docker/web-search/patch-mcp-web-search.mjs docker/web-search/overrides/bing.js scripts/mcp-smoke-client.mjs scripts/smoke-web-search.mjs scripts/smoke-docs.mjs
 
 node -e 'const fs=require("node:fs"); JSON.parse(fs.readFileSync("snippets/opencode.json", "utf8")); JSON.parse(fs.readFileSync("snippets/claude.mcp.json", "utf8"));'
 bin/context-kit install opencode > "${tmp_dir}/opencode.json"
@@ -60,13 +110,14 @@ bin/context-kit redaction-check "${tmp_dir}/opencode.json" "${tmp_dir}/claude.js
 assert_redaction_check_does_not_disclose_matches
 
 bin/context-kit redaction-check
-docker compose -p context-kit -f compose.yml config >/dev/null
-if env -u HOME docker compose --env-file /dev/null -p context-kit-release-home-check -f compose.yml config >"${tmp_dir}/compose-no-home.out" 2>"${tmp_dir}/compose-no-home.err"; then
+docker compose -p "${CONTEXT_KIT_COMPOSE_PROJECT}" -f compose.yml config >/dev/null
+if env -u HOME -u CONTEXT_KIT_DATA_DIR -u CONTEXT_KIT_DOCS_LOCAL_SOURCES_DIR docker compose --env-file /dev/null -p context-kit-release-home-check -f compose.yml config >"${tmp_dir}/compose-no-home.out" 2>"${tmp_dir}/compose-no-home.err"; then
   printf 'compose config unexpectedly succeeded without HOME or CONTEXT_KIT_DATA_DIR\n' >&2
   exit 1
 fi
 CONTEXT_KIT_DATA_DIR="${tmp_dir}/compose-data" env -u HOME docker compose --env-file /dev/null -p context-kit-release-home-check -f compose.yml config >/dev/null
 bin/context-kit build
+assert_web_search_image
 bin/context-kit restart
 bin/context-kit doctor
 node scripts/smoke-web-search.mjs bin/context-kit web-search

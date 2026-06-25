@@ -6,13 +6,13 @@ Local web search. Local docs. Repo packing. No API keys required.
 
 ## What You Get
 
-Context Kit gives coding agents three local MCP servers:
+Context Kit gives coding agents three local tools:
 
-| Server | Purpose | Default |
-|---|---|---|
-| `context-web-search` | Current web search through local SearXNG plus URL fetch/extract | Enabled |
-| `context-docs` | Semantic search over curated `llms.txt` documentation | Enabled |
-| `context-repomix` | Pack local or remote repositories into AI-friendly context | Enabled |
+| Tool | Purpose |
+|---|---|
+| `context-web-search` | Current web search through local SearXNG plus URL fetch/extract |
+| `context-docs` | Semantic search over curated `llms.txt` documentation |
+| `context-repomix` | Pack repositories into AI-friendly context |
 
 The first public release deliberately keeps the surface area small: web search,
 docs search, and repository packing.
@@ -53,23 +53,17 @@ The default snippet uses `context-kit` on `PATH`. Use
 `bin/context-kit install opencode --absolute` only for private, machine-local
 config that will not be committed.
 
-## Defaults
+## How It Runs
 
 - SearXNG binds to `127.0.0.1:8099` only.
-- `context-web-search` defaults `search_web` to SearXNG, then falls back to
-  DuckDuckGo and Bing. Bing uses Chromium inside the web-search image.
-- `fetch_url` uses upstream HTTP extraction. In `mcp-web-search` 1.3.0,
-  `engine=browser` is accepted but does not invoke Chromium yet.
-- `context-docs` runs as a long-lived service on `127.0.0.1:8776` (Streamable
-  HTTP MCP) so every client shares one indexer and one Chroma writer. The
-  `bin/context-kit docs` stdio command is kept as a compatibility shim for
-  clients that cannot speak HTTP MCP.
+- `context-web-search` and `context-repomix` run as local stdio MCP commands.
+- `context-docs` runs as a local HTTP MCP service. `bin/context-kit docs` is a
+  stdio fallback for clients that cannot use HTTP MCP.
 - `context-docs` browser CORS is disabled by default; set exact local origins
   only when a browser-based client needs direct access.
 - Docs and model caches live in `$HOME/.local/share/context-kit`.
 - Docs refresh TTL defaults to `24h`.
-- MCP containers are labeled `dev.context-kit=true` for safe inspection and cleanup.
-- Repomix mounts only the current project read-only, not your whole home directory.
+- Repomix mounts only the current project read-only.
 - No code-editing MCP server is enabled by default.
 
 ## Docs Sources
@@ -91,8 +85,11 @@ Example:
 
 ```sh
 CONTEXT_KIT_DOCS_SOURCES="config/sources.default.txt config/sources.js.txt" \
-  bin/context-kit docs
+  bin/context-kit restart
 ```
+
+Source changes are loaded by `start`/`restart`; `bin/context-kit docs` is only a
+stdio bridge to the already-running docs service.
 
 Large vendor feeds are opt-in because they can expand to thousands of sections
 and take a while to embed.
@@ -105,6 +102,8 @@ bin/context-kit stop
 bin/context-kit build
 bin/context-kit status
 bin/context-kit doctor
+bin/context-kit install claude
+bin/context-kit install opencode
 bin/context-kit redaction-check
 ```
 
@@ -114,6 +113,13 @@ MCP entrypoints:
 bin/context-kit web-search
 bin/context-kit docs
 bin/context-kit repomix
+```
+
+After pulling Context Kit updates, rebuild local images and restart services:
+
+```sh
+bin/context-kit build
+bin/context-kit restart
 ```
 
 ## Security Model

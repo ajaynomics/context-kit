@@ -7,7 +7,10 @@ Explicit environment variables win over `.env` values. The `.env` parser accepts
 simple `KEY=VALUE` lines for `CONTEXT_KIT_*` variables only; it does not execute
 shell code.
 
-## Core Variables
+## User-Facing Variables
+
+Only the variables below are part of the public configuration surface. Other
+`CONTEXT_KIT_*` variables used by scripts are release/test hooks and may change.
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -68,14 +71,21 @@ Avoid `*`; the docs MCP is a local unauthenticated endpoint.
 
 ## Source Profiles
 
-The docs MCP accepts one or more source files:
+The docs MCP accepts one or more source profile files:
 
 ```sh
 CONTEXT_KIT_DOCS_SOURCES="config/sources.default.txt config/sources.js.txt"
 ```
 
-Each source file is plain text. Blank lines and `#` comments are ignored.
-Entries may be absolute source-profile paths for private machine-local config.
+Source changes are loaded when the docs service starts. Run `bin/context-kit
+restart` after changing `CONTEXT_KIT_DOCS_SOURCES`; `bin/context-kit docs` only
+bridges stdio clients to the already-running service.
+
+`CONTEXT_KIT_DOCS_SOURCES` may include absolute paths to private machine-local
+profile files. Each profile file is plain text; blank lines and `#` comments are
+ignored. Entries inside profile files must be URLs ending in `/llms.txt` or
+`/llms-full.txt`.
+
 For local llms.txt files, place content under
 `CONTEXT_KIT_DOCS_LOCAL_SOURCES_DIR` and reference it as
 `http://127.0.0.1:8769/path/inside/local-sources/llms.txt` or another URL that

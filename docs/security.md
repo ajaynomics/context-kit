@@ -6,6 +6,7 @@ Context Kit is designed to be safe by default for local development.
 
 - SearXNG is bound to `127.0.0.1` only.
 - No hosted API keys are required.
+- The web-search MCP image runs as the non-root `node` user.
 - Repomix mounts only the current project read-only.
 - Docs indexing stores data under `$HOME/.local/share/context-kit` unless you
   override it.

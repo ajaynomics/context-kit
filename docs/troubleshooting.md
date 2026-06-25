@@ -6,8 +6,21 @@
 bin/context-kit doctor
 ```
 
-This checks Docker, Compose, images, the Docker network, SearXNG health, and
-docs source configuration.
+This checks Docker, Compose, images, the Docker network, SearXNG health, docs
+HTTP readiness, and docs source configuration.
+
+For release-grade MCP protocol checks, run:
+
+```sh
+scripts/release-check
+```
+
+Live provider checks are opt-in because search engines, remote docs, and model
+downloads can fail independently of this repo:
+
+```sh
+CONTEXT_KIT_LIVE_CHECKS=1 scripts/release-check
+```
 
 ## SearXNG Is Not Responding
 
@@ -66,11 +79,13 @@ URL fetching uses the HTTP extractor path.
 
 ## Docs Indexing Is Slow
 
-The first run downloads an embedding model and embeds every configured docs
-section. Keep default sources small, and add profiles only when you need them.
+The first `docs_query` or `docs_refresh` downloads an embedding model and
+embeds the requested docs sections lazily. Keep default sources small, and add
+profiles only when you need them.
 
 Cloudflare and other large docs sets can take significantly longer than the
-default source profile.
+default source profile. Set `CONTEXT_KIT_DOCS_PREINDEX=1` only if you want
+startup to eagerly embed every configured source.
 
 ## Docs Tools Say Index Manager Not Initialized
 
@@ -79,7 +94,7 @@ If `docs_query` or `docs_refresh` returns `Index manager not initialized` while
 initialize its embedding model or Chroma database. Check the container logs:
 
 ```sh
-docker logs context-kit-docs-mcp
+docker compose -p "${CONTEXT_KIT_COMPOSE_PROJECT:-context-kit}" -f compose.yml logs docs-mcp
 ```
 
 A common cause is Docker creating the bind-mounted cache directories as `root`
@@ -93,7 +108,7 @@ unable to open database file
 Fix ownership and restart:
 
 ```sh
-DATA_DIR="${CONTEXT_KIT_DATA_DIR:-$HOME/.local/share/context-kit}"
+DATA_DIR="${CONTEXT_KIT_DATA_DIR:-${HOME:?Set HOME or CONTEXT_KIT_DATA_DIR}/.local/share/context-kit}"
 sudo chown -R "$(id -u):$(id -g)" "$DATA_DIR/docs" "$DATA_DIR/models"
 bin/context-kit restart
 ```

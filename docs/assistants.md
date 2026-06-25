@@ -1,7 +1,14 @@
 # Assistant Setup
 
-Context Kit supports any assistant that can run local stdio MCP servers. The
-included snippets cover Claude Code and OpenCode.
+Context Kit supports assistants that can run local stdio MCP servers, HTTP MCP
+servers, or both. The default transport split is simple:
+
+- `context-web-search`: local stdio command.
+- `context-docs`: local HTTP MCP service.
+- `context-repomix`: local stdio command.
+
+`bin/context-kit docs` is a stdio fallback for clients that cannot use HTTP MCP.
+The included snippets cover Claude Code and OpenCode.
 
 ## Claude Code
 

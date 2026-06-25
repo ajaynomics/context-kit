@@ -42,22 +42,26 @@ fail() {
 
 load_env_file
 
-DEFAULT_DATA_DIR="${HOME:-${PWD}}/.local/share/context-kit"
+if [[ -z "${CONTEXT_KIT_DATA_DIR:-}" && -z "${HOME:-}" ]]; then
+  fail "HOME or CONTEXT_KIT_DATA_DIR must be set"
+fi
+
+DEFAULT_DATA_DIR="${HOME:-}/.local/share/context-kit"
 PROJECT="${CONTEXT_KIT_COMPOSE_PROJECT:-context-kit}"
 COMPOSE_FILE="${ROOT}/compose.yml"
 DATA_DIR="${CONTEXT_KIT_DATA_DIR:-${DEFAULT_DATA_DIR}}"
-NETWORK="${CONTEXT_KIT_DOCKER_NETWORK:-${PROJECT}_default}"
+NETWORK="${PROJECT}_default"
 SEARXNG_PORT="${CONTEXT_KIT_SEARXNG_PORT:-8099}"
 DOCS_PORT="${CONTEXT_KIT_DOCS_PORT:-8776}"
 DOCS_HTTP_URL="${CONTEXT_KIT_DOCS_HTTP_URL:-http://127.0.0.1:${DOCS_PORT}/mcp}"
 WEB_SEARCH_MAX_BYTES="${CONTEXT_KIT_WEB_SEARCH_MAX_BYTES:-52428800}"
-WEB_SEARCH_PROVIDER="${CONTEXT_KIT_WEB_SEARCH_PROVIDER:-${DEFAULT_SEARCH_PROVIDER:-searxng}}"
-WEB_SEARCH_HTTP_TIMEOUT="${CONTEXT_KIT_WEB_SEARCH_HTTP_TIMEOUT:-${HTTP_TIMEOUT:-15000}}"
-WEB_SEARCH_MAX_RESULTS="${CONTEXT_KIT_WEB_SEARCH_MAX_RESULTS:-${MAX_RESULTS:-10}}"
-WEB_SEARCH_CHROME_PATH="${CONTEXT_KIT_WEB_SEARCH_CHROME_PATH:-${CHROME_PATH:-/usr/bin/chromium}}"
-WEB_SEARCH_BROWSER_USER_AGENT="${CONTEXT_KIT_WEB_SEARCH_BROWSER_USER_AGENT:-${BROWSER_SEARCH_USER_AGENT:-}}"
-WEB_SEARCH_MCP_COMPAT_MODE="${CONTEXT_KIT_WEB_SEARCH_MCP_COMPAT_MODE:-${MCP_COMPAT_MODE:-}}"
-DOCS_CONTAINER_NAME="context-kit-docs-mcp"
+WEB_SEARCH_PROVIDER="${CONTEXT_KIT_WEB_SEARCH_PROVIDER:-searxng}"
+WEB_SEARCH_HTTP_TIMEOUT="${CONTEXT_KIT_WEB_SEARCH_HTTP_TIMEOUT:-15000}"
+WEB_SEARCH_MAX_RESULTS="${CONTEXT_KIT_WEB_SEARCH_MAX_RESULTS:-10}"
+WEB_SEARCH_CHROME_PATH="${CONTEXT_KIT_WEB_SEARCH_CHROME_PATH:-/usr/bin/chromium}"
+WEB_SEARCH_BROWSER_USER_AGENT="${CONTEXT_KIT_WEB_SEARCH_BROWSER_USER_AGENT:-}"
+WEB_SEARCH_MCP_COMPAT_MODE="${CONTEXT_KIT_WEB_SEARCH_MCP_COMPAT_MODE:-}"
+DOCS_SERVICE_NAME="docs-mcp"
 DOCS_SOURCES_FILE="${DATA_DIR}/docs-sources.txt"
 DOCS_DATA_DIR="${DATA_DIR}/docs"
 MODELS_DATA_DIR="${DATA_DIR}/models"
@@ -108,8 +112,16 @@ compose() {
   CONTEXT_KIT_DOCS_PREINDEX="${CONTEXT_KIT_DOCS_PREINDEX:-0}" \
   CONTEXT_KIT_DOCS_LOCAL_SOURCES_DIR="${DOCS_LOCAL_SOURCES_DIR}" \
   CONTEXT_KIT_DOCS_LOCAL_SOURCES_PORT="${DOCS_LOCAL_SOURCES_PORT}" \
-  BUILDX_BUILDER="${CONTEXT_KIT_BUILDX_BUILDER:-${BUILDX_BUILDER:-default}}" \
+  CONTEXT_KIT_WEB_SEARCH_IMAGE="${WEB_SEARCH_IMAGE}" \
+  CONTEXT_KIT_DOCS_IMAGE="${DOCS_IMAGE}" \
+  BUILDX_BUILDER="${CONTEXT_KIT_BUILDX_BUILDER:-default}" \
   docker compose -p "${PROJECT}" -f "${COMPOSE_FILE}" "$@"
+}
+
+require_no_args() {
+  local usage_text="$1"
+  shift
+  [[ "$#" -eq 0 ]] || fail "${usage_text}"
 }
 
 write_docs_sources_file() {
@@ -150,41 +162,6 @@ check_data_dirs() {
     fi
   done
   return "${ok}"
-}
-
-check_web_search_schema_patch() {
-  docker run --rm --entrypoint node \
-    -e MAX_BYTES="${WEB_SEARCH_MAX_BYTES}" \
-    -e EXPECTED_MAX_BYTES="${WEB_SEARCH_MAX_BYTES}" \
-    "${WEB_SEARCH_IMAGE}" \
-    -e '
-const fs = require("node:fs");
-const expected = Number(process.env.EXPECTED_MAX_BYTES) || 0;
-const actual = Number(process.env.MAX_BYTES) || 0;
-const serverPath = "/usr/local/lib/node_modules/@zhafron/mcp-web-search/dist/src/server.js";
-const source = fs.readFileSync(serverPath, "utf8");
-if (actual !== expected) process.exit(1);
-if (!source.includes("max_download_bytes: z.number().int().min(1).max(MAX_BYTES).optional()")) process.exit(1);
-' >/dev/null 2>&1
-}
-
-check_web_search_bing_override() {
-  docker run --rm --entrypoint node \
-    "${WEB_SEARCH_IMAGE}" \
-    -e '
-const fs = require("node:fs");
-const bingPath = "/usr/local/lib/node_modules/@zhafron/mcp-web-search/dist/src/providers/bing.js";
-const source = fs.readFileSync(bingPath, "utf8");
-if (!source.includes("Context Kit override for @zhafron/mcp-web-search 1.3.0")) process.exit(1);
-if (!source.includes("waitForSelector")) process.exit(1);
-if (!source.includes("decodeBingRedirect")) process.exit(1);
-' >/dev/null 2>&1
-}
-
-check_web_search_chrome() {
-  docker run --rm --entrypoint /usr/bin/test \
-    "${WEB_SEARCH_IMAGE}" \
-    -x "${WEB_SEARCH_CHROME_PATH}" >/dev/null 2>&1
 }
 
 warn() {
@@ -239,21 +216,35 @@ wait_for_searxng() {
   done
 
   warn "SearXNG did not become ready on 127.0.0.1:${SEARXNG_PORT} after 30s"
+  return 1
+}
+
+docs_service_running() {
+  local container_id
+  container_id="$(compose ps -q "${DOCS_SERVICE_NAME}" 2>/dev/null || true)"
+  [[ -n "${container_id}" ]] || return 1
+  docker inspect -f '{{.State.Running}}' "${container_id}" 2>/dev/null | grep -qx true
 }
 
 wait_for_docs_mcp() {
   command -v curl >/dev/null 2>&1 || return 0
 
-  # First-run can take a while: model download + full preindex of every source.
-  local attempt
+  # First run can take a while: model download plus optional eager preindexing.
+  local attempt http_ready=0
   for attempt in {1..180}; do
     if curl -fsS -o /dev/null "http://127.0.0.1:${DOCS_PORT}/status" 2>/dev/null; then
-      return 0
+      http_ready=1
+      break
     fi
     sleep 1
   done
 
-  warn "docs-mcp did not become ready on 127.0.0.1:${DOCS_PORT} after 180s (check: docker logs ${DOCS_CONTAINER_NAME})"
+  if [[ "${http_ready}" -ne 1 ]]; then
+    warn "docs-mcp did not become ready on 127.0.0.1:${DOCS_PORT} after 180s (check: docker compose logs ${DOCS_SERVICE_NAME})"
+    return 1
+  fi
+
+  return 0
 }
 
 abs_dir() {
@@ -293,7 +284,7 @@ resolved_sources() {
 }
 
 cmd_build() {
-  [[ "$#" -eq 0 ]] || fail "usage: context-kit build"
+  require_no_args "usage: context-kit build" "$@"
   require_docker
   # web-search-mcp is still profile-gated (built but not auto-started);
   # docs-mcp is a regular long-lived service so it builds without a profile.
@@ -303,6 +294,7 @@ cmd_build() {
 }
 
 cmd_start() {
+  require_no_args "usage: context-kit start" "$@"
   require_docker
   prepare_data_dirs
   if ! docker image inspect "${WEB_SEARCH_IMAGE}" >/dev/null 2>&1 || ! docker image inspect "${DOCS_IMAGE}" >/dev/null 2>&1; then
@@ -315,11 +307,19 @@ cmd_start() {
 }
 
 cmd_stop() {
+  require_no_args "usage: context-kit stop" "$@"
   require_docker
   compose stop searxng docs-mcp
 }
 
+cmd_restart() {
+  require_no_args "usage: context-kit restart" "$@"
+  cmd_stop
+  cmd_start
+}
+
 cmd_status() {
+  require_no_args "usage: context-kit status" "$@"
   require_docker
   printf 'Services\n'
   compose ps
@@ -327,9 +327,9 @@ cmd_status() {
   docker image ls --format '{{.Repository}}:{{.Tag}}\t{{.Size}}' \
     | grep -E '^(context-kit/|ghcr.io/yamadashy/repomix:)' || true
   printf '\nActive per-call MCP containers\n'
-  docker ps -a --filter label=dev.context-kit=true --format '{{.Names}}\t{{.Status}}\t{{.Image}}\t{{.Command}}' \
-    | awk 'BEGIN { print "NAMES\tSTATUS\tIMAGE\tCOMMAND" } $1 !~ /^context-kit-(docs-mcp|searxng-1)$/ { print }'
-  printf '\nDocs MCP endpoint\n- %s (container: %s)\n' "${DOCS_HTTP_URL}" "${DOCS_CONTAINER_NAME}"
+  docker ps -a --filter label=dev.context-kit=true --format '{{.Names}}\t{{.Status}}\t{{.Image}}\t{{.Command}}\t{{.Label "com.docker.compose.service"}}' \
+    | awk -F '\t' 'BEGIN { print "NAMES\tSTATUS\tIMAGE\tCOMMAND" } $5 !~ /^(searxng|docs-mcp)$/ { print $1 "\t" $2 "\t" $3 "\t" $4 }'
+  printf '\nDocs MCP endpoint\n- %s (service: %s)\n' "${DOCS_HTTP_URL}" "${DOCS_SERVICE_NAME}"
   printf '\nDocs sources\n'
   resolved_sources | sed 's/^/- /'
   printf '\nLocal docs source directory\n- %s (served inside docs-mcp at http://127.0.0.1:%s/)\n' "${DOCS_LOCAL_SOURCES_DIR}" "${DOCS_LOCAL_SOURCES_PORT}"
@@ -337,6 +337,7 @@ cmd_status() {
 }
 
 cmd_doctor() {
+  require_no_args "usage: context-kit doctor" "$@"
   local ok=0
   printf 'Context Kit doctor\n'
 
@@ -376,27 +377,6 @@ cmd_doctor() {
     fi
   done
 
-  if docker image inspect "${WEB_SEARCH_IMAGE}" >/dev/null 2>&1; then
-    if check_web_search_schema_patch; then
-      printf 'pass web-search fetch_url max-bytes schema patch: %s\n' "${WEB_SEARCH_MAX_BYTES}"
-    else
-      printf 'fail web-search max-bytes schema patch missing; run: context-kit build\n'
-      ok=1
-    fi
-    if check_web_search_bing_override; then
-      printf 'pass web-search Bing provider override installed\n'
-    else
-      printf 'fail web-search Bing provider override missing; run: context-kit build\n'
-      ok=1
-    fi
-    if check_web_search_chrome; then
-      printf 'pass web-search Chromium path: %s\n' "${WEB_SEARCH_CHROME_PATH}"
-    else
-      printf 'fail web-search Chromium path unavailable: %s\n' "${WEB_SEARCH_CHROME_PATH}"
-      ok=1
-    fi
-  fi
-
   if command -v curl >/dev/null 2>&1 && curl -fsS "http://127.0.0.1:${SEARXNG_PORT}/healthz" >/dev/null 2>&1; then
     printf 'pass SearXNG responds on 127.0.0.1:%s\n' "${SEARXNG_PORT}"
   else
@@ -421,6 +401,7 @@ cmd_doctor() {
 }
 
 cmd_web_search() {
+  require_no_args "usage: context-kit web-search" "$@"
   require_docker
   require_network
   require_image "${WEB_SEARCH_IMAGE}" "context-kit build"
@@ -433,7 +414,7 @@ cmd_web_search() {
     "${cidfile_args[@]}" \
     --network "${NETWORK}" \
     -e DEFAULT_SEARCH_PROVIDER="${WEB_SEARCH_PROVIDER}" \
-    -e SEARXNG_URL="${SEARXNG_URL:-http://searxng:8080}" \
+    -e SEARXNG_URL="http://searxng:8080" \
     -e CHROME_PATH="${WEB_SEARCH_CHROME_PATH}" \
     -e HTTP_TIMEOUT="${WEB_SEARCH_HTTP_TIMEOUT}" \
     -e MAX_BYTES="${WEB_SEARCH_MAX_BYTES}" \
@@ -444,6 +425,7 @@ cmd_web_search() {
 }
 
 cmd_docs() {
+  require_no_args "usage: context-kit docs" "$@"
   # Prefer the `type: remote` MCP config pointing at ${DOCS_HTTP_URL}.
   # This stdio entrypoint is kept for clients that cannot speak HTTP MCP:
   # it spawns a thin mcp-proxy bridge per call but all calls multiplex onto
@@ -453,11 +435,11 @@ cmd_docs() {
   require_network
   require_image "${DOCS_IMAGE}" "context-kit build"
 
-  if ! docker ps --filter "name=^${DOCS_CONTAINER_NAME}$" --filter "status=running" --format '{{.Names}}' | grep -qx "${DOCS_CONTAINER_NAME}"; then
+  if ! docs_service_running; then
     fail "long-lived docs-mcp not running; start it with: context-kit start"
   fi
 
-  local bridge_url="http://${DOCS_CONTAINER_NAME}:8000/mcp"
+  local bridge_url="http://${DOCS_SERVICE_NAME}:8000/mcp"
   local cidfile_args=()
   if [[ -n "${CONTEXT_KIT_DOCKER_CIDFILE:-}" ]]; then
     cidfile_args=(--cidfile "${CONTEXT_KIT_DOCKER_CIDFILE}")
@@ -473,6 +455,7 @@ cmd_docs() {
 }
 
 cmd_repomix() {
+  require_no_args "usage: context-kit repomix" "$@"
   require_docker
   require_image "${REPOMIX_IMAGE}" "docker pull ${REPOMIX_IMAGE}"
   local dir mount_dir
@@ -557,9 +540,12 @@ JSON
 cmd_install() {
   local target="${1:-}"
   shift || true
+  local option="${1:-}"
+  shift || true
+  [[ "$#" -eq 0 ]] || fail "usage: context-kit install claude|opencode [--absolute]"
   case "${target}" in
-    opencode) print_opencode "${1:-}" ;;
-    claude) print_claude "${1:-}" ;;
+    opencode) print_opencode "${option}" ;;
+    claude) print_claude "${option}" ;;
     *) fail "usage: context-kit install claude|opencode [--absolute]" ;;
   esac
 }
@@ -611,7 +597,7 @@ cmd_redaction_check() {
 case "${1:-}" in
   start) shift; cmd_start "$@" ;;
   stop) shift; cmd_stop "$@" ;;
-  restart) shift; cmd_stop; cmd_start "$@" ;;
+  restart) shift; cmd_restart "$@" ;;
   build) shift; cmd_build "$@" ;;
   status) shift; cmd_status "$@" ;;
   doctor) shift; cmd_doctor "$@" ;;

@@ -20,7 +20,7 @@ services:
       context: ./docker/web-search
       args:
         MCP_WEB_SEARCH_MAX_BYTES: "${CONTEXT_KIT_WEB_SEARCH_MAX_BYTES:-52428800}"
-    image: context-kit/web-search-mcp:latest
+    image: ${CONTEXT_KIT_WEB_SEARCH_IMAGE:-context-kit/web-search-mcp:latest}
     profiles: ["mcp"]
     stdin_open: true
     tty: false
@@ -39,10 +39,9 @@ services:
   docs-mcp:
     build:
       context: ./docker/docs
-    image: context-kit/docs-mcp:latest
+    image: ${CONTEXT_KIT_DOCS_IMAGE:-context-kit/docs-mcp:latest}
     # Long-lived shared docs MCP. One container = one Chroma writer; clients
     # connect over Streamable HTTP (mcp-proxy bridges llms-txt-mcp's stdio).
-    container_name: context-kit-docs-mcp
     restart: unless-stopped
     ports:
       - "127.0.0.1:${CONTEXT_KIT_DOCS_PORT:-8776}:8000"

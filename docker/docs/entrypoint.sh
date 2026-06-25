@@ -15,6 +15,12 @@ sources_file="${DOCS_MCP_SOURCES_FILE:-/etc/context-kit/docs-sources.txt}"
 local_sources_dir="${DOCS_MCP_LOCAL_SOURCES_DIR:-/etc/context-kit/local-sources}"
 local_sources_port="${DOCS_MCP_LOCAL_SOURCES_PORT:-8769}"
 
+if [ ! -f "$sources_file" ]; then
+  echo "docs-mcp: sources file missing: $sources_file" >&2
+  echo "docs-mcp: run bin/context-kit start to generate it, or mount a file at that path." >&2
+  exit 64
+fi
+
 if [ ! -r "$sources_file" ]; then
   echo "docs-mcp: sources file not readable: $sources_file" >&2
   echo "docs-mcp: set DOCS_MCP_SOURCES_FILE or mount one at that path." >&2

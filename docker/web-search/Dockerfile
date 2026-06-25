@@ -24,9 +24,13 @@ RUN npm install -g "@zhafron/mcp-web-search@${MCP_WEB_SEARCH_VERSION}" \
 
 ENV CHROME_PATH=/usr/bin/chromium \
   DEFAULT_SEARCH_PROVIDER=searxng \
+  HOME=/tmp \
   HTTP_TIMEOUT=15000 \
   MAX_BYTES=${MCP_WEB_SEARCH_MAX_BYTES} \
   MAX_RESULTS=10 \
-  SEARXNG_URL=http://searxng:8080
+  SEARXNG_URL=http://searxng:8080 \
+  XDG_CACHE_HOME=/tmp/.cache
+
+USER node
 
 ENTRYPOINT ["mcp-web-search"]
