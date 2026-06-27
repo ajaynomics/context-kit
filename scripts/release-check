@@ -18,6 +18,7 @@ PY
 release_id="release-$$"
 export CONTEXT_KIT_COMPOSE_PROJECT="context-kit-${release_id}"
 export CONTEXT_KIT_DATA_DIR="${tmp_dir}/data"
+export CONTEXT_KIT_PROJECT_DIR="${ROOT}"
 export CONTEXT_KIT_SEARXNG_PORT="$(pick_port)"
 export CONTEXT_KIT_DOCS_PORT="$(pick_port)"
 export CONTEXT_KIT_DOCS_SOURCES="config/sources.default.txt"
@@ -90,13 +91,26 @@ git ls-files --cached --error-unmatch \
   scripts/mcp-smoke-client.mjs \
   scripts/smoke-web-search.mjs \
   scripts/smoke-docs.mjs \
+  scripts/smoke-repomix.mjs \
   scripts/release-check >/dev/null
 bash -n bin/context-kit
 bash -n scripts/release-check
 sh -n docker/docs/entrypoint.sh
-check_node docker/web-search/patch-mcp-web-search.mjs docker/web-search/overrides/bing.js scripts/mcp-smoke-client.mjs scripts/smoke-web-search.mjs scripts/smoke-docs.mjs
+check_node docker/web-search/patch-mcp-web-search.mjs docker/web-search/overrides/bing.js scripts/mcp-smoke-client.mjs scripts/smoke-web-search.mjs scripts/smoke-docs.mjs scripts/smoke-repomix.mjs
 
 node -e 'const fs=require("node:fs"); JSON.parse(fs.readFileSync("snippets/opencode.json", "utf8")); JSON.parse(fs.readFileSync("snippets/claude.mcp.json", "utf8"));'
+CONTEXT_KIT_DOCS_HTTP_URL="http://127.0.0.1:8776/mcp" bin/context-kit install opencode > "${tmp_dir}/opencode-default.json"
+cmp -s snippets/opencode.json "${tmp_dir}/opencode-default.json" || {
+  printf 'snippets/opencode.json differs from bin/context-kit install opencode output\n' >&2
+  diff -u snippets/opencode.json "${tmp_dir}/opencode-default.json" >&2 || true
+  exit 1
+}
+CONTEXT_KIT_DOCS_HTTP_URL="http://127.0.0.1:8776/mcp" bin/context-kit install claude > "${tmp_dir}/claude-default.json"
+cmp -s snippets/claude.mcp.json "${tmp_dir}/claude-default.json" || {
+  printf 'snippets/claude.mcp.json differs from bin/context-kit install claude output\n' >&2
+  diff -u snippets/claude.mcp.json "${tmp_dir}/claude-default.json" >&2 || true
+  exit 1
+}
 bin/context-kit install opencode > "${tmp_dir}/opencode.json"
 bin/context-kit install opencode --absolute > "${tmp_dir}/opencode-absolute.json"
 bin/context-kit install claude > "${tmp_dir}/claude.json"
@@ -122,5 +136,6 @@ bin/context-kit restart
 bin/context-kit doctor
 node scripts/smoke-web-search.mjs bin/context-kit web-search
 node scripts/smoke-docs.mjs bin/context-kit docs
+node scripts/smoke-repomix.mjs bin/context-kit repomix
 
 printf 'pass release-check\n'
