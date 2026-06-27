@@ -66,6 +66,28 @@ config that will not be committed.
 - Repomix mounts only the current project read-only.
 - No code-editing MCP server is enabled by default.
 
+## Public Repo vs Local Runtime State
+
+This repository is the public, portable Context Kit distribution. It should only
+contain generic defaults, Docker/service code, install snippets, and optional
+public docs source profiles.
+
+Machine-specific configuration stays out of git:
+
+- `.env` is ignored. Use it for local ports, data paths, and private source
+  profile paths.
+- `CONTEXT_KIT_DATA_DIR` stores runtime state: docs indexes, model caches, the
+  generated `docs-sources.txt`, and any local source tree you choose to keep
+  there.
+- Private docs source profiles can live anywhere outside the repo and can be
+  referenced from `.env` with an absolute path.
+- Private `llms.txt` menus belong under `CONTEXT_KIT_DOCS_LOCAL_SOURCES_DIR`, not
+  under `config/`.
+
+The public default is intentionally small: `config/sources.default.txt`. If a
+machine adds extra local menus, they affect only that machine's running
+`context-docs` service.
+
 ## Docs Sources
 
 The default docs index is intentionally small:

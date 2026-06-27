@@ -7,6 +7,47 @@ Explicit environment variables win over `.env` values. The `.env` parser accepts
 simple `KEY=VALUE` lines for `CONTEXT_KIT_*` variables only; it does not execute
 shell code.
 
+## Public Files vs Local State
+
+Context Kit is meant to be a public repo plus private local runtime state.
+
+Tracked public files:
+
+- `config/sources.default.txt`: small default docs index.
+- `config/sources.*.txt`: optional public source profiles.
+- `snippets/`: portable assistant config snippets that use `context-kit` on
+  `PATH`.
+- `compose.yml`, `docker/`, `bin/`, and `scripts/`: generic runtime and release
+  logic.
+
+Ignored or external local files:
+
+- `.env`: local overrides; never commit it.
+- `CONTEXT_KIT_DATA_DIR`: docs indexes, model caches, generated
+  `docs-sources.txt`, and local source trees.
+- Private source profile files referenced by absolute path from `.env`.
+- Private `llms.txt` menus under `CONTEXT_KIT_DOCS_LOCAL_SOURCES_DIR`.
+
+Do not put personal project menus, private repo names, or local filesystem paths
+in `config/`. Put them in a private source profile outside the repo, then add
+that profile to `.env`:
+
+```sh
+CONTEXT_KIT_DOCS_SOURCES="config/sources.default.txt /path/to/private-sources.txt"
+CONTEXT_KIT_DOCS_LOCAL_SOURCES_DIR=/path/to/local-sources
+```
+
+Entries in the private profile should still be URLs, not filesystem paths. For a
+local menu stored at `/path/to/local-sources/my-project/llms.txt`, reference it
+as:
+
+```text
+http://127.0.0.1:8769/my-project/llms.txt
+```
+
+That loopback URL is inside the `docs-mcp` container. It is not exposed on the
+host.
+
 ## User-Facing Variables
 
 Only the variables below are part of the public configuration surface. Other
