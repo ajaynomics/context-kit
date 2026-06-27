@@ -21,10 +21,25 @@ export CONTEXT_KIT_DATA_DIR="${tmp_dir}/data"
 export CONTEXT_KIT_PROJECT_DIR="${ROOT}"
 export CONTEXT_KIT_SEARXNG_PORT="$(pick_port)"
 export CONTEXT_KIT_DOCS_PORT="$(pick_port)"
-export CONTEXT_KIT_DOCS_SOURCES="config/sources.default.txt"
 export CONTEXT_KIT_DOCS_LOCAL_SOURCES_DIR="${tmp_dir}/local-sources"
+export CONTEXT_KIT_DOCS_LOCAL_SOURCES_PORT="8769"
+local_sources_profile="${tmp_dir}/sources.local.txt"
+export CONTEXT_KIT_DOCS_SOURCES="config/sources.default.txt ${local_sources_profile}"
+export CONTEXT_KIT_LOCAL_SOURCE_SMOKE_URL="http://127.0.0.1:${CONTEXT_KIT_DOCS_LOCAL_SOURCES_PORT}/release-fixture/llms.txt"
 export CONTEXT_KIT_WEB_SEARCH_IMAGE="context-kit/web-search-mcp:${release_id}"
 export CONTEXT_KIT_DOCS_IMAGE="context-kit/docs-mcp:${release_id}"
+
+mkdir -p "${CONTEXT_KIT_DOCS_LOCAL_SOURCES_DIR}/release-fixture"
+printf '%s\n' \
+  '# Release Check Local Source' \
+  '' \
+  '> Exercises machine-local llms.txt serving and refresh behavior.' \
+  '' \
+  '## MCP' \
+  '' \
+  '- [Model Context Protocol](https://modelcontextprotocol.io/)' \
+  > "${CONTEXT_KIT_DOCS_LOCAL_SOURCES_DIR}/release-fixture/llms.txt"
+printf '%s\n' "${CONTEXT_KIT_LOCAL_SOURCE_SMOKE_URL}" > "${local_sources_profile}"
 
 cleanup() {
   docker compose -p "${CONTEXT_KIT_COMPOSE_PROJECT}" -f compose.yml down -v --remove-orphans >/dev/null 2>&1 || true

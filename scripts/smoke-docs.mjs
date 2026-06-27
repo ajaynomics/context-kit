@@ -1,6 +1,7 @@
 import { requireToolSuccess, runSmoke } from "./mcp-smoke-client.mjs";
 
 const live = process.env.CONTEXT_KIT_LIVE_CHECKS === "1";
+const localSourceSmokeUrl = process.env.CONTEXT_KIT_LOCAL_SOURCE_SMOKE_URL;
 
 runSmoke({
   usage: "usage: node scripts/smoke-docs.mjs <command> [args...]",
@@ -20,6 +21,16 @@ runSmoke({
       tools: Array.from(toolNames).sort(),
       docs_sources: "pass"
     };
+
+    if (localSourceSmokeUrl) {
+      requireToolSuccess("docs_refresh/local_source_first", await client.callTool("docs_refresh", {
+        source: localSourceSmokeUrl
+      }));
+      requireToolSuccess("docs_refresh/local_source_second", await client.callTool("docs_refresh", {
+        source: localSourceSmokeUrl
+      }));
+      result.local_source_refresh = "pass";
+    }
 
     if (live) {
       const query = requireToolSuccess("docs_query", await client.callTool("docs_query", {

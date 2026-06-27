@@ -46,10 +46,28 @@ for source_url in $sources; do
 done
 
 if [ -d "$local_sources_dir" ]; then
-  python -m http.server "$local_sources_port" \
-    --bind 127.0.0.1 \
-    --directory "$local_sources_dir" \
-    >/tmp/context-kit-local-sources.log 2>&1 &
+  python - "$local_sources_port" "$local_sources_dir" >/tmp/context-kit-local-sources.log 2>&1 <<'PY' &
+import functools
+import http.server
+import sys
+
+
+class LocalSourceHandler(http.server.SimpleHTTPRequestHandler):
+    def send_head(self):
+        # llms-txt-mcp 0.2.0 treats 304 responses from local sources as fetch
+        # failures, so serve machine-local docs as plain 200 responses.
+        for header in ("If-Modified-Since", "If-None-Match"):
+            if header in self.headers:
+                del self.headers[header]
+        return super().send_head()
+
+
+port = int(sys.argv[1])
+directory = sys.argv[2]
+handler = functools.partial(LocalSourceHandler, directory=directory)
+with http.server.ThreadingHTTPServer(("127.0.0.1", port), handler) as server:
+    server.serve_forever()
+PY
   local_sources_pid="$!"
   if ! python - "$local_sources_port" <<'PY'
 import sys
