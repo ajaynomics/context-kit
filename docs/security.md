@@ -5,8 +5,11 @@ Context Kit is designed to be safe by default for local development.
 ## Defaults
 
 - SearXNG is bound to `127.0.0.1` only.
+- Web-search and docs MCP HTTP endpoints are bound to `127.0.0.1` only.
 - No hosted API keys are required.
 - The web-search MCP image runs as the non-root `node` user.
+- Web-search MCP sessions are stateless. Its HTTP front end permits only
+  loopback/internal Host values and rejects every supplied Origin with 403.
 - Repomix mounts only the current project read-only.
 - Docs indexing stores data under `$HOME/.local/share/context-kit` unless you
   override it.
@@ -36,10 +39,14 @@ Do not expose SearXNG or MCP servers to the public internet without a separate
 review. The default setup is for localhost development.
 
 The containers may bind to `0.0.0.0` internally, but the Compose file publishes
-SearXNG and docs-mcp only on `127.0.0.1`. If you run the images outside the
-provided Compose file, review port publishing, SearXNG's limiter/secret, and MCP
-authentication separately.
+SearXNG, web-search-mcp, and docs-mcp only on `127.0.0.1`. If you run the images
+outside the provided Compose file, review port publishing, SearXNG's
+limiter/secret, and MCP authentication separately.
 
 Browser CORS for `context-docs` is disabled by default. Only set
 `CONTEXT_KIT_DOCS_ALLOW_ORIGIN` for exact local origins that need direct browser
 access; avoid wildcard origins for unauthenticated local MCP endpoints.
+
+`context-web-search` does not expose browser CORS configuration. Browser requests
+carry Origin and are rejected; CLI/server-side MCP clients omit Origin. A local
+reverse proxy must preserve this policy and present an allowed loopback Host.

@@ -6,8 +6,9 @@
 bin/context-kit doctor
 ```
 
-This checks Docker, Compose, images, the Docker network, SearXNG health, docs
-HTTP readiness, and docs source configuration.
+This checks Docker, Compose, images, the Docker network, SearXNG health, a real
+web-search MCP initialize/tools-list exchange, docs HTTP readiness, and docs
+source configuration.
 
 For release-grade MCP protocol checks, run:
 
@@ -45,6 +46,65 @@ Build default images:
 ```sh
 bin/context-kit build
 ```
+
+## Repeated Per-Project Containers
+
+Current OpenCode and Claude snippets connect web search and docs directly to the
+shared HTTP services. If every project still starts a web-search container,
+regenerate the snippet, update the assistant configuration, and restart the
+assistant:
+
+```sh
+bin/context-kit install opencode
+bin/context-kit install claude
+```
+
+For the upgrade from `origin/main`, build and start once. `start` creates only
+the missing web-search service and refuses to recreate existing services:
+
+```sh
+bin/context-kit build
+bin/context-kit start
+```
+
+Context Kit never performs a global Docker prune. Inspect labeled resources and
+their owners explicitly:
+
+```sh
+docker ps -a --filter label=dev.context-kit=true \
+  --format 'table {{.ID}}\t{{.Names}}\t{{.Status}}\t{{.Label "dev.context-kit.lifecycle"}}\t{{.Label "dev.context-kit.owner"}}\t{{.Label "com.docker.compose.service"}}'
+```
+
+Containers from the old per-call web-search launcher have an empty Compose
+service and no lifecycle/owner labels. After all old assistant processes are
+stopped, remove only the exact legacy container IDs you verified; do not use a
+name-pattern or global prune.
+
+Lifecycle commands for one Compose project use a canonical, uid-owned lock and
+reject cross-user control. Failed startup removes only newly-created service
+containers, restores existing container states by ID, and never removes the
+network or cache volume. `start` uses Compose `--no-recreate`, leaving an
+existing container unchanged when its image or environment differs from the
+current Compose model; it never silently replaces that container. Inspect the
+shared services without deleting them:
+
+```sh
+bin/context-kit status
+docker compose -p "${CONTEXT_KIT_COMPOSE_PROJECT:-context-kit}" -f compose.yml logs web-search-mcp docs-mcp searxng
+```
+
+Use the protocol-level doctor check. `/healthz` also performs initialize and
+tools/list rather than trusting the proxy's static `/status` metadata:
+
+```sh
+bin/context-kit doctor
+curl http://127.0.0.1:8777/healthz
+```
+
+`bin/context-kit status` lists legacy labeled containers that have neither a
+Compose service nor lifecycle label. This is diagnostic only; Context Kit never
+auto-removes them. Stop their old assistant owners before removing individually
+verified container IDs.
 
 ## Fetch URL Says Max Download Bytes Is Too Big
 

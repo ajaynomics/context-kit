@@ -19,8 +19,10 @@ release_id="release-$$"
 export CONTEXT_KIT_COMPOSE_PROJECT="context-kit-${release_id}"
 export CONTEXT_KIT_DATA_DIR="${tmp_dir}/data"
 export CONTEXT_KIT_PROJECT_DIR="${ROOT}"
-export CONTEXT_KIT_SEARXNG_PORT="$(pick_port)"
-export CONTEXT_KIT_DOCS_PORT="$(pick_port)"
+CONTEXT_KIT_SEARXNG_PORT="$(pick_port)"
+CONTEXT_KIT_WEB_SEARCH_PORT="$(pick_port)"
+CONTEXT_KIT_DOCS_PORT="$(pick_port)"
+export CONTEXT_KIT_SEARXNG_PORT CONTEXT_KIT_WEB_SEARCH_PORT CONTEXT_KIT_DOCS_PORT
 export CONTEXT_KIT_DOCS_LOCAL_SOURCES_DIR="${tmp_dir}/local-sources"
 export CONTEXT_KIT_DOCS_LOCAL_SOURCES_PORT="8769"
 local_sources_profile="${tmp_dir}/sources.local.txt"
@@ -95,6 +97,69 @@ if (!bing.includes("decodeBingRedirect")) process.exit(1);
   docker run --rm --entrypoint /usr/bin/test \
     "${CONTEXT_KIT_WEB_SEARCH_IMAGE}" \
     -x "${CONTEXT_KIT_WEB_SEARCH_CHROME_PATH:-/usr/bin/chromium}"
+
+  docker run --rm --entrypoint /usr/bin/test \
+    "${CONTEXT_KIT_WEB_SEARCH_IMAGE}" \
+    -x /opt/mcp-proxy/bin/mcp-proxy
+
+  docker run --rm --entrypoint /usr/bin/test \
+    "${CONTEXT_KIT_WEB_SEARCH_IMAGE}" \
+    -r /usr/local/lib/context-kit/http-entrypoint.mjs
+
+  docker run --rm --entrypoint /usr/bin/test \
+    "${CONTEXT_KIT_WEB_SEARCH_IMAGE}" \
+    -r /usr/local/lib/context-kit/mcp-probe.mjs
+}
+
+assert_hostile_requests_rejected() {
+  local status
+  status="$(curl -sS -o /dev/null -w '%{http_code}' \
+    -H 'Host: attacker.example' \
+    -H 'Content-Type: application/json' \
+    --data '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' \
+    "http://127.0.0.1:${CONTEXT_KIT_WEB_SEARCH_PORT}/mcp")"
+  [[ "${status}" == 421 ]] || {
+    printf 'hostile Host returned HTTP %s instead of 421\n' "${status}" >&2
+    return 1
+  }
+  status="$(curl -sS -o /dev/null -w '%{http_code}' \
+    -H 'Origin: https://attacker.example' \
+    -H 'Content-Type: application/json' \
+    --data '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' \
+    "http://127.0.0.1:${CONTEXT_KIT_WEB_SEARCH_PORT}/mcp")"
+  [[ "${status}" == 403 ]] || {
+    printf 'hostile Origin returned HTTP %s instead of 403\n' "${status}" >&2
+    return 1
+  }
+}
+
+assert_web_search_backend_supervision() {
+  local container_id before after attempt
+  container_id="$(docker compose -p "${CONTEXT_KIT_COMPOSE_PROJECT}" -f compose.yml ps -q web-search-mcp)"
+  before="$(docker inspect -f '{{.RestartCount}}' "${container_id}")"
+  docker exec "${container_id}" sh -eu -c '
+    for command_path in /proc/[0-9]*/cmdline; do
+      command="$(tr "\000" " " < "${command_path}")"
+      case "${command}" in
+        *node*mcp-web-search*)
+          pid="${command_path#/proc/}"
+          pid="${pid%/cmdline}"
+          kill -KILL "${pid}"
+          exit 0
+          ;;
+      esac
+    done
+    exit 1
+  '
+  for ((attempt=1; attempt <= 60; attempt++)); do
+    after="$(docker inspect -f '{{.RestartCount}}' "${container_id}")"
+    if [[ "${after}" -gt "${before}" ]] && node docker/web-search/mcp-probe.mjs "http://127.0.0.1:${CONTEXT_KIT_WEB_SEARCH_PORT}/mcp" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  printf 'web-search container did not restart after backend death\n' >&2
+  return 1
 }
 
 git diff --check HEAD
@@ -107,20 +172,27 @@ git ls-files --cached --error-unmatch \
   scripts/smoke-web-search.mjs \
   scripts/smoke-docs.mjs \
   scripts/smoke-repomix.mjs \
+  scripts/test-compose-upgrade.sh \
+  scripts/test-lifecycle.sh \
+  scripts/test-web-search-http.mjs \
+  docker/web-search/mcp-probe.mjs \
+  docker/web-search/http-entrypoint.mjs \
   scripts/release-check >/dev/null
 bash -n bin/context-kit
 bash -n scripts/release-check
+bash -n scripts/test-compose-upgrade.sh
+bash -n scripts/test-lifecycle.sh
 sh -n docker/docs/entrypoint.sh
-check_node docker/web-search/patch-mcp-web-search.mjs docker/web-search/overrides/bing.js scripts/mcp-smoke-client.mjs scripts/smoke-web-search.mjs scripts/smoke-docs.mjs scripts/smoke-repomix.mjs
+check_node docker/web-search/patch-mcp-web-search.mjs docker/web-search/overrides/bing.js docker/web-search/mcp-probe.mjs docker/web-search/http-entrypoint.mjs scripts/mcp-smoke-client.mjs scripts/smoke-web-search.mjs scripts/smoke-docs.mjs scripts/smoke-repomix.mjs scripts/test-web-search-http.mjs
 
 node -e 'const fs=require("node:fs"); JSON.parse(fs.readFileSync("snippets/opencode.json", "utf8")); JSON.parse(fs.readFileSync("snippets/claude.mcp.json", "utf8"));'
-CONTEXT_KIT_DOCS_HTTP_URL="http://127.0.0.1:8776/mcp" bin/context-kit install opencode > "${tmp_dir}/opencode-default.json"
+CONTEXT_KIT_WEB_SEARCH_HTTP_URL="http://127.0.0.1:8777/mcp" CONTEXT_KIT_DOCS_HTTP_URL="http://127.0.0.1:8776/mcp" bin/context-kit install opencode > "${tmp_dir}/opencode-default.json"
 cmp -s snippets/opencode.json "${tmp_dir}/opencode-default.json" || {
   printf 'snippets/opencode.json differs from bin/context-kit install opencode output\n' >&2
   diff -u snippets/opencode.json "${tmp_dir}/opencode-default.json" >&2 || true
   exit 1
 }
-CONTEXT_KIT_DOCS_HTTP_URL="http://127.0.0.1:8776/mcp" bin/context-kit install claude > "${tmp_dir}/claude-default.json"
+CONTEXT_KIT_WEB_SEARCH_HTTP_URL="http://127.0.0.1:8777/mcp" CONTEXT_KIT_DOCS_HTTP_URL="http://127.0.0.1:8776/mcp" bin/context-kit install claude > "${tmp_dir}/claude-default.json"
 cmp -s snippets/claude.mcp.json "${tmp_dir}/claude-default.json" || {
   printf 'snippets/claude.mcp.json differs from bin/context-kit install claude output\n' >&2
   diff -u snippets/claude.mcp.json "${tmp_dir}/claude-default.json" >&2 || true
@@ -137,6 +209,9 @@ node -e 'const fs=require("node:fs"); for (const file of process.argv.slice(1)) 
   "${tmp_dir}/claude-absolute.json"
 bin/context-kit redaction-check "${tmp_dir}/opencode.json" "${tmp_dir}/claude.json"
 assert_redaction_check_does_not_disclose_matches
+bash scripts/test-compose-upgrade.sh
+bash scripts/test-lifecycle.sh
+node scripts/test-web-search-http.mjs
 
 bin/context-kit redaction-check
 docker compose -p "${CONTEXT_KIT_COMPOSE_PROJECT}" -f compose.yml config >/dev/null
@@ -147,10 +222,13 @@ fi
 CONTEXT_KIT_DATA_DIR="${tmp_dir}/compose-data" env -u HOME docker compose --env-file /dev/null -p context-kit-release-home-check -f compose.yml config >/dev/null
 bin/context-kit build
 assert_web_search_image
-bin/context-kit restart
+bin/context-kit start
 bin/context-kit doctor
+node docker/web-search/mcp-probe.mjs "http://127.0.0.1:${CONTEXT_KIT_WEB_SEARCH_PORT}/mcp"
+assert_hostile_requests_rejected
 node scripts/smoke-web-search.mjs bin/context-kit web-search
 node scripts/smoke-docs.mjs bin/context-kit docs
 node scripts/smoke-repomix.mjs bin/context-kit repomix
+assert_web_search_backend_supervision
 
 printf 'pass release-check\n'

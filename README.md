@@ -56,9 +56,17 @@ config that will not be committed.
 ## How It Runs
 
 - SearXNG binds to `127.0.0.1:8099` only.
-- `context-web-search` and `context-repomix` run as local stdio MCP commands.
-- `context-docs` runs as a local HTTP MCP service. `bin/context-kit docs` is a
-  stdio fallback for clients that cannot use HTTP MCP.
+- `context-web-search` and `context-docs` are long-lived HTTP MCP services on
+  `127.0.0.1:8777` and `127.0.0.1:8776`. All assistant projects reuse them.
+- `bin/context-kit web-search` and `bin/context-kit docs` are stdio bridges for
+  local clients that cannot use HTTP MCP directly.
+- `context-repomix` remains a per-call stdio container because its read-only
+  project mount is caller-specific.
+- Shared containers and the network have Compose-derived deterministic names.
+  Web search records the owning host uid; client containers are named and
+  labeled per launcher process and remove only themselves.
+- Web search uses stateless MCP HTTP sessions, validates Host, rejects every
+  supplied Origin, and exits for Docker restart if its stdio backend dies.
 - `context-docs` browser CORS is disabled by default; set exact local origins
   only when a browser-based client needs direct access.
 - Docs and model caches live in `$HOME/.local/share/context-kit`.
@@ -137,12 +145,23 @@ bin/context-kit docs
 bin/context-kit repomix
 ```
 
-After pulling Context Kit updates, rebuild local images and restart services:
+For this upgrade from `origin/main`, build images and safely add the missing
+shared web-search service without recreating the existing SearXNG or docs
+containers:
 
 ```sh
 bin/context-kit build
-bin/context-kit restart
+bin/context-kit start
 ```
+
+`start` always uses Compose `--no-recreate`. `restart` restarts the same
+container IDs and does not apply a rebuilt image or changed container
+environment. Context Kit intentionally has no implicit destructive replacement
+command.
+
+When an update changes an MCP transport, regenerate the assistant snippet and
+replace the corresponding configuration before restarting the assistant. The
+current snippets connect both web search and docs directly over HTTP.
 
 ## Security Model
 
@@ -163,6 +182,7 @@ See `docs/security.md` for details.
 - Docker with Compose v2
 - Bash
 - `curl` for health checks
+- `flock` from util-linux for serialized service lifecycle operations
 
 No hosted API keys are required for the default stack.
 

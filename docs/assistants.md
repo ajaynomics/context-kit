@@ -3,12 +3,14 @@
 Context Kit supports assistants that can run local stdio MCP servers, HTTP MCP
 servers, or both. The default transport split is simple:
 
-- `context-web-search`: local stdio command.
+- `context-web-search`: local HTTP MCP service.
 - `context-docs`: local HTTP MCP service.
 - `context-repomix`: local stdio command.
 
-`bin/context-kit docs` is a stdio fallback for clients that cannot use HTTP MCP.
-The included snippets cover Claude Code and OpenCode.
+`bin/context-kit web-search` and `bin/context-kit docs` are stdio fallbacks for
+clients that cannot use HTTP MCP. They bridge to the shared services and do not
+stop those services when the client exits. The included snippets cover Claude
+Code and OpenCode.
 
 ## Claude Code
 
