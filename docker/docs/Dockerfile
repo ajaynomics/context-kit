@@ -29,7 +29,7 @@ RUN if [ -n "${LLMS_TXT_MCP_VERSION}" ]; then \
  && rm /tmp/context-kit-docs-constraints.txt
 
 COPY entrypoint.sh /usr/local/bin/docs-mcp-entrypoint
-RUN chmod +x /usr/local/bin/docs-mcp-entrypoint
+RUN chmod 0555 /usr/local/bin/docs-mcp-entrypoint
 
 RUN mkdir -p /data /models /etc/context-kit
 ENV HF_HOME=/models \

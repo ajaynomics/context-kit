@@ -3,13 +3,26 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONTEXT_KIT="${ROOT}/bin/context-kit"
+RELEASE_CHECK="${ROOT}/scripts/release-check"
 TEST_ROOT="$(mktemp -d)"
 TEST_PROJECT="context-kit-lifecycle-$$"
 LOCK_DIR="/tmp/context-kit-${TEST_PROJECT}.lock"
+RELEASE_LOCK_TEST_PROJECT="context-kit-release-$((900000000 + $$))"
+RELEASE_LOCK_DIR="/tmp/context-kit-${RELEASE_LOCK_TEST_PROJECT}.lock"
+LOCK_HOLDER_PID=''
 cleanup() {
+  if [[ -n "${LOCK_HOLDER_PID}" ]]; then
+    kill "${LOCK_HOLDER_PID}" 2>/dev/null || true
+    wait "${LOCK_HOLDER_PID}" 2>/dev/null || true
+  fi
   rm -rf "${TEST_ROOT}"
   if [[ -d "${LOCK_DIR}" && "$(stat -c %u "${LOCK_DIR}")" == "$(id -u)" ]]; then
     rm -rf "${LOCK_DIR}"
+  fi
+  if [[ -L "${RELEASE_LOCK_DIR}" ]]; then
+    rm -f "${RELEASE_LOCK_DIR}"
+  elif [[ -d "${RELEASE_LOCK_DIR}" && "$(stat -c %u "${RELEASE_LOCK_DIR}")" == "$(id -u)" ]]; then
+    rm -rf "${RELEASE_LOCK_DIR}"
   fi
 }
 trap cleanup EXIT
@@ -34,6 +47,16 @@ fake_service_for_container() {
     fi
   done
   return 1
+}
+
+assert_docs_sources_restored_before_state_change() {
+  if [[ -n "${FAKE_EXPECT_DOCS_SOURCES:-}" ]]; then
+    cmp -s "${FAKE_EXPECT_DOCS_SOURCES}" "${CONTEXT_KIT_DATA_DIR}/docs-sources.txt" \
+      || fail_test "container state restoration ran before prior docs sources content was restored"
+  elif [[ "${FAKE_EXPECT_DOCS_SOURCES_ABSENT:-0}" -eq 1 ]]; then
+    [[ ! -e "${CONTEXT_KIT_DATA_DIR}/docs-sources.txt" && ! -L "${CONTEXT_KIT_DATA_DIR}/docs-sources.txt" ]] \
+      || fail_test "container state restoration ran before prior docs sources absence was restored"
+  fi
 }
 
 fake_compose() {
@@ -164,12 +187,14 @@ docker() {
     start)
       local container_id="${!#}" service
       if service="$(fake_service_for_container "${container_id}" 2>/dev/null)"; then
+        assert_docs_sources_restored_before_state_change
         touch "${FAKE_DOCKER_STATE}/service.${service}.running"
       fi
       ;;
     rm)
       local container_id="${!#}" service
       if service="$(fake_service_for_container "${container_id}" 2>/dev/null)"; then
+        assert_docs_sources_restored_before_state_change
         rm -f "${FAKE_DOCKER_STATE}/service.${service}.id" "${FAKE_DOCKER_STATE}/service.${service}.running"
       fi
       rm -f "${FAKE_DOCKER_STATE}/owner.${container_id}"
@@ -177,6 +202,7 @@ docker() {
     stop)
       local container_id="${!#}" service
       service="$(fake_service_for_container "${container_id}")" || return 1
+      assert_docs_sources_restored_before_state_change
       rm -f "${FAKE_DOCKER_STATE}/service.${service}.running"
       ;;
     ps)
@@ -214,7 +240,7 @@ curl() {
 }
 
 sleep() { return 0; }
-export -f fail_test fake_log fake_service_for_container fake_compose docker curl sleep
+export -f fail_test fake_log fake_service_for_container assert_docs_sources_restored_before_state_change fake_compose docker curl sleep
 
 new_case() {
   local name="$1"
@@ -232,7 +258,8 @@ new_case() {
   export CONTEXT_KIT_DOCS_SOURCES=config/sources.default.txt
   unset CONTEXT_KIT_DOCKER_CIDFILE CONTEXT_KIT_RUNTIME_DIR FAKE_DOCS_UID FAKE_WEB_UID \
     FAKE_REPLACEMENT_REQUIRED FAKE_RESTART_FAIL FAKE_DROP_RUNNING FAKE_SEARXNG_FAIL \
-    FAKE_WEB_SEARCH_FAIL FAKE_DOCS_FAIL FAKE_LEGACY_CONTAINER FAKE_CLIENT_OWNER_MISMATCH
+    FAKE_WEB_SEARCH_FAIL FAKE_DOCS_FAIL FAKE_LEGACY_CONTAINER FAKE_CLIENT_OWNER_MISMATCH \
+    FAKE_EXPECT_DOCS_SOURCES FAKE_EXPECT_DOCS_SOURCES_ABSENT
   mkdir -p "${FAKE_DOCKER_STATE}" "${HOME}"
   : > "${FAKE_DOCKER_LOG}"
 }
@@ -244,6 +271,62 @@ seed_service() {
     touch "${FAKE_DOCKER_STATE}/service.${service}.running"
   fi
 }
+
+assert_no_docs_sources_artifacts() {
+  if compgen -G "${CONTEXT_KIT_DATA_DIR}/docs-sources.txt.lifecycle-backup.*" >/dev/null \
+    || compgen -G "${CONTEXT_KIT_DATA_DIR}/docs-sources.txt.tmp.*" >/dev/null; then
+    fail_test "docs sources transaction left backup or render artifacts"
+  fi
+}
+
+mkdir -m 700 "${RELEASE_LOCK_DIR}"
+: > "${RELEASE_LOCK_DIR}/lifecycle"
+chmod 755 "${RELEASE_LOCK_DIR}"
+if "${RELEASE_CHECK}" --cleanup-ephemeral-lock "${RELEASE_LOCK_TEST_PROJECT}" >"${TEST_ROOT}/unsafe-lock.out" 2>&1; then
+  fail_test "release lock cleanup accepted an unsafe mode"
+fi
+[[ -d "${RELEASE_LOCK_DIR}" ]] || fail_test "release lock cleanup removed an unsafe lock"
+chmod 700 "${RELEASE_LOCK_DIR}"
+"${RELEASE_CHECK}" --cleanup-ephemeral-lock "${RELEASE_LOCK_TEST_PROJECT}"
+
+release_lock_target="${TEST_ROOT}/release-lock-symlink-target"
+mkdir -m 700 "${release_lock_target}"
+touch "${release_lock_target}/sentinel"
+ln -s "${release_lock_target}" "${RELEASE_LOCK_DIR}"
+if "${RELEASE_CHECK}" --cleanup-ephemeral-lock "${RELEASE_LOCK_TEST_PROJECT}" >"${TEST_ROOT}/symlink-lock.out" 2>&1; then
+  fail_test "release lock cleanup followed a symlink"
+fi
+[[ -f "${release_lock_target}/sentinel" ]] || fail_test "release lock cleanup changed a symlink target"
+rm -f "${RELEASE_LOCK_DIR}"
+rm -rf "${release_lock_target}"
+
+mkdir -m 700 "${RELEASE_LOCK_DIR}"
+: > "${RELEASE_LOCK_DIR}/lifecycle"
+(
+  flock -x 9
+  touch "${TEST_ROOT}/release-lock-held"
+  /bin/sleep 30
+) 9>"${RELEASE_LOCK_DIR}/lifecycle" &
+LOCK_HOLDER_PID=$!
+for _ in {1..100}; do
+  [[ -f "${TEST_ROOT}/release-lock-held" ]] && break
+  /bin/sleep 0.01
+done
+[[ -f "${TEST_ROOT}/release-lock-held" ]] || fail_test "release lock holder did not start"
+if "${RELEASE_CHECK}" --cleanup-ephemeral-lock "${RELEASE_LOCK_TEST_PROJECT}" >"${TEST_ROOT}/held-lock.out" 2>&1; then
+  fail_test "release lock cleanup removed a held lock"
+fi
+grep -F 'still held' "${TEST_ROOT}/held-lock.out" >/dev/null || fail_test "held lock refusal was not explicit"
+kill "${LOCK_HOLDER_PID}"
+wait "${LOCK_HOLDER_PID}" 2>/dev/null || true
+LOCK_HOLDER_PID=''
+"${RELEASE_CHECK}" --cleanup-ephemeral-lock "${RELEASE_LOCK_TEST_PROJECT}"
+[[ ! -e "${RELEASE_LOCK_DIR}" && ! -L "${RELEASE_LOCK_DIR}" ]] || fail_test "successful release lock cleanup left the lock path"
+
+mkdir -m 700 "${RELEASE_LOCK_DIR}"
+: > "${RELEASE_LOCK_DIR}/lifecycle"
+"${RELEASE_CHECK}" --cleanup-ephemeral-lock "${RELEASE_LOCK_TEST_PROJECT}"
+[[ ! -e "${RELEASE_LOCK_DIR}" && ! -L "${RELEASE_LOCK_DIR}" ]] || fail_test "release lock cleanup did not remove its known ephemeral lock"
 
 new_case snippets
 "${CONTEXT_KIT}" install opencode > "${CASE_ROOT}/opencode.json"
@@ -319,6 +402,12 @@ new_case readiness-failure
 touch "${FAKE_DOCKER_STATE}/network" "${FAKE_DOCKER_STATE}/volume"
 seed_service searxng
 seed_service docs-mcp stopped
+mkdir -p "${CONTEXT_KIT_DATA_DIR}"
+printf 'prior docs sources\nwith exact content\n' > "${CASE_ROOT}/prior-docs-sources.txt"
+cp "${CASE_ROOT}/prior-docs-sources.txt" "${CONTEXT_KIT_DATA_DIR}/docs-sources.txt"
+printf 'https://new.example.test/llms.txt\n' > "${CASE_ROOT}/new-sources.txt"
+export CONTEXT_KIT_DOCS_SOURCES="${CASE_ROOT}/new-sources.txt"
+export FAKE_EXPECT_DOCS_SOURCES="${CASE_ROOT}/prior-docs-sources.txt"
 export FAKE_DROP_RUNNING=searxng
 export FAKE_WEB_SEARCH_FAIL=1
 if "${CONTEXT_KIT}" start >"${CASE_ROOT}/start.out" 2>&1; then
@@ -326,6 +415,9 @@ if "${CONTEXT_KIT}" start >"${CASE_ROOT}/start.out" 2>&1; then
 fi
 [[ -f "${FAKE_DOCKER_STATE}/service.searxng.running" ]] || fail_test "readiness rollback did not restart prior searxng"
 [[ ! -f "${FAKE_DOCKER_STATE}/service.docs-mcp.running" ]] || fail_test "readiness rollback did not restore prior stopped docs state"
+[[ "$(<"${FAKE_DOCKER_STATE}/service.docs-mcp.id")" == cid-docs-mcp ]] || fail_test "readiness rollback changed the prior docs container ID"
+cmp -s "${CASE_ROOT}/prior-docs-sources.txt" "${CONTEXT_KIT_DATA_DIR}/docs-sources.txt" || fail_test "readiness rollback did not restore prior docs sources content"
+assert_no_docs_sources_artifacts
 [[ ! -f "${FAKE_DOCKER_STATE}/service.web-search-mcp.id" ]] || fail_test "readiness rollback left its new web container"
 [[ -f "${FAKE_DOCKER_STATE}/network" && -f "${FAKE_DOCKER_STATE}/volume" ]] || fail_test "readiness rollback removed origin resources"
 
@@ -338,19 +430,40 @@ export CONTEXT_KIT_DOCS_SOURCES="${CASE_ROOT}/sources.txt"
 "${CONTEXT_KIT}" restart
 grep -F 'https://example.test/llms.txt' "${CONTEXT_KIT_DATA_DIR}/docs-sources.txt" >/dev/null \
   || fail_test "restart did not regenerate the bind-mounted docs source list"
+assert_no_docs_sources_artifacts
 
 new_case restart-failure
 seed_service searxng stopped
 seed_service web-search-mcp
-seed_service docs-mcp
-export FAKE_DROP_RUNNING=docs-mcp
-export FAKE_RESTART_FAIL=1
+seed_service docs-mcp stopped
+mkdir -p "${CONTEXT_KIT_DATA_DIR}"
+printf 'prior restart sources\n' > "${CASE_ROOT}/prior-docs-sources.txt"
+cp "${CASE_ROOT}/prior-docs-sources.txt" "${CONTEXT_KIT_DATA_DIR}/docs-sources.txt"
+printf 'https://restart.example.test/llms.txt\n' > "${CASE_ROOT}/new-sources.txt"
+export CONTEXT_KIT_DOCS_SOURCES="${CASE_ROOT}/new-sources.txt"
+export FAKE_EXPECT_DOCS_SOURCES="${CASE_ROOT}/prior-docs-sources.txt"
+export FAKE_DOCS_FAIL=1
 if "${CONTEXT_KIT}" restart >"${CASE_ROOT}/restart.out" 2>&1; then
   fail_test "restart failure unexpectedly succeeded"
 fi
-[[ -f "${FAKE_DOCKER_STATE}/service.docs-mcp.running" ]] || fail_test "restart rollback left prior docs down"
+[[ ! -f "${FAKE_DOCKER_STATE}/service.docs-mcp.running" ]] || fail_test "restart rollback did not restore prior stopped docs state"
+[[ "$(<"${FAKE_DOCKER_STATE}/service.docs-mcp.id")" == cid-docs-mcp ]] || fail_test "restart rollback changed the prior docs container ID"
 [[ ! -f "${FAKE_DOCKER_STATE}/service.searxng.running" ]] || fail_test "restart rollback did not restore prior stopped SearXNG state"
+cmp -s "${CASE_ROOT}/prior-docs-sources.txt" "${CONTEXT_KIT_DATA_DIR}/docs-sources.txt" || fail_test "restart rollback did not restore prior docs sources content"
+assert_no_docs_sources_artifacts
 grep -F 'docker rm' "${FAKE_DOCKER_LOG}" >/dev/null && fail_test "restart rollback removed a shared container"
+
+new_case render-error
+mkdir -p "${CONTEXT_KIT_DATA_DIR}"
+printf 'prior render-error sources\n' > "${CASE_ROOT}/prior-docs-sources.txt"
+cp "${CASE_ROOT}/prior-docs-sources.txt" "${CONTEXT_KIT_DATA_DIR}/docs-sources.txt"
+export CONTEXT_KIT_DOCS_SOURCES="${CASE_ROOT}/missing-sources.txt"
+if "${CONTEXT_KIT}" start >"${CASE_ROOT}/start.out" 2>&1; then
+  fail_test "docs sources render error unexpectedly succeeded"
+fi
+cmp -s "${CASE_ROOT}/prior-docs-sources.txt" "${CONTEXT_KIT_DATA_DIR}/docs-sources.txt" || fail_test "render error did not restore prior docs sources"
+assert_no_docs_sources_artifacts
+grep -F ' up ' "${FAKE_DOCKER_LOG}" >/dev/null && fail_test "render error reached Compose startup"
 
 new_case cross-user
 seed_service docs-mcp
@@ -363,12 +476,18 @@ grep -F ' up ' "${FAKE_DOCKER_LOG}" >/dev/null && fail_test "cross-user rejectio
 
 new_case bounded-failure
 export FAKE_WEB_SEARCH_FAIL=1
+export FAKE_EXPECT_DOCS_SOURCES_ABSENT=1
+[[ ! -e "${CONTEXT_KIT_DATA_DIR}/docs-sources.txt" && ! -L "${CONTEXT_KIT_DATA_DIR}/docs-sources.txt" ]] \
+  || fail_test "prior-absence case unexpectedly began with docs sources"
 if "${CONTEXT_KIT}" start >"${CASE_ROOT}/start.out" 2>&1; then
   fail_test "fresh readiness failure unexpectedly succeeded"
 fi
 for service in searxng web-search-mcp docs-mcp; do
   [[ ! -f "${FAKE_DOCKER_STATE}/service.${service}.id" ]] || fail_test "fresh failure left ${service}"
 done
+[[ ! -e "${CONTEXT_KIT_DATA_DIR}/docs-sources.txt" && ! -L "${CONTEXT_KIT_DATA_DIR}/docs-sources.txt" ]] \
+  || fail_test "fresh readiness rollback did not restore prior docs sources absence"
+assert_no_docs_sources_artifacts
 [[ -f "${FAKE_DOCKER_STATE}/network" && -f "${FAKE_DOCKER_STATE}/volume" ]] || fail_test "bounded shared resources were destructively removed"
 
 new_case legacy-status

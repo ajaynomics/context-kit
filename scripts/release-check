@@ -1,6 +1,83 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+cleanup_ephemeral_lifecycle_lock() {
+  local project="${1:-}" lock_dir lock_file owner mode lock_owner
+  [[ "${project}" =~ ^context-kit-release-[0-9]+$ ]] || {
+    printf 'release-check: refusing non-release lifecycle lock project: %s\n' "${project}" >&2
+    return 64
+  }
+  command -v flock >/dev/null 2>&1 || {
+    printf 'release-check: flock is required for lifecycle lock cleanup\n' >&2
+    return 1
+  }
+  command -v stat >/dev/null 2>&1 || {
+    printf 'release-check: stat is required for lifecycle lock cleanup\n' >&2
+    return 1
+  }
+
+  lock_dir="/tmp/context-kit-${project}.lock"
+  lock_file="${lock_dir}/lifecycle"
+  [[ -e "${lock_dir}" || -L "${lock_dir}" ]] || return 0
+  [[ -d "${lock_dir}" && ! -L "${lock_dir}" ]] || {
+    printf 'release-check: refusing unsafe lifecycle lock path: %s\n' "${lock_dir}" >&2
+    return 1
+  }
+  if [[ -e "${lock_file}" || -L "${lock_file}" ]]; then
+    [[ -f "${lock_file}" && ! -L "${lock_file}" ]] || {
+      printf 'release-check: refusing unsafe lifecycle lock file: %s\n' "${lock_file}" >&2
+      return 1
+    }
+  fi
+
+  (
+    exec 9>"${lock_file}" || return 1
+    if ! flock -n 9; then
+      printf 'release-check: lifecycle lock is still held: %s\n' "${lock_dir}" >&2
+      return 1
+    fi
+
+    [[ -d "${lock_dir}" && ! -L "${lock_dir}" ]] || {
+      printf 'release-check: lifecycle lock path changed while acquiring it: %s\n' "${lock_dir}" >&2
+      return 1
+    }
+    owner="$(stat -c %u "${lock_dir}")"
+    mode="$(stat -c %a "${lock_dir}")"
+    [[ "${owner}" == "$(id -u)" && "${mode}" == "700" ]] || {
+      printf 'release-check: refusing lifecycle lock with uid %s and mode %s: %s\n' "${owner}" "${mode}" "${lock_dir}" >&2
+      return 1
+    }
+    [[ -f "${lock_file}" && ! -L "${lock_file}" ]] || {
+      printf 'release-check: lifecycle lock file changed while acquiring it: %s\n' "${lock_file}" >&2
+      return 1
+    }
+    lock_owner="$(stat -c %u "${lock_file}")"
+    [[ "${lock_owner}" == "$(id -u)" ]] || {
+      printf 'release-check: refusing lifecycle lock file owned by uid %s: %s\n' "${lock_owner}" "${lock_file}" >&2
+      return 1
+    }
+
+    rm -f -- "${lock_file}"
+    if ! rmdir -- "${lock_dir}"; then
+      printf 'release-check: lifecycle lock directory contains unexpected entries: %s\n' "${lock_dir}" >&2
+      return 1
+    fi
+  )
+}
+
+if [[ "${1:-}" == "--cleanup-ephemeral-lock" ]]; then
+  [[ "$#" -eq 2 ]] || {
+    printf 'usage: scripts/release-check --cleanup-ephemeral-lock context-kit-release-PID\n' >&2
+    exit 64
+  }
+  cleanup_ephemeral_lifecycle_lock "$2"
+  exit
+fi
+[[ "$#" -eq 0 ]] || {
+  printf 'usage: scripts/release-check\n' >&2
+  exit 64
+}
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT}"
 
@@ -44,9 +121,16 @@ printf '%s\n' \
 printf '%s\n' "${CONTEXT_KIT_LOCAL_SOURCE_SMOKE_URL}" > "${local_sources_profile}"
 
 cleanup() {
+  local status="$?" lock_status=0
+  trap - EXIT
   docker compose -p "${CONTEXT_KIT_COMPOSE_PROJECT}" -f compose.yml down -v --remove-orphans >/dev/null 2>&1 || true
   docker image rm "${CONTEXT_KIT_WEB_SEARCH_IMAGE}" "${CONTEXT_KIT_DOCS_IMAGE}" >/dev/null 2>&1 || true
+  cleanup_ephemeral_lifecycle_lock "${CONTEXT_KIT_COMPOSE_PROJECT}" || lock_status=$?
   rm -rf "${tmp_dir}"
+  if [[ "${status}" -ne 0 ]]; then
+    exit "${status}"
+  fi
+  exit "${lock_status}"
 }
 trap cleanup EXIT
 

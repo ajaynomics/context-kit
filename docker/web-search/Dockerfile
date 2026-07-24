@@ -29,6 +29,8 @@ RUN npm install -g "@zhafron/mcp-web-search@${MCP_WEB_SEARCH_VERSION}" \
   && rm /tmp/patch-mcp-web-search.mjs /tmp/context-kit-bing-provider.js \
   && npm cache clean --force
 
+RUN chmod 0555 /usr/local/lib/context-kit
+
 ENV CHROME_PATH=/usr/bin/chromium \
   DEFAULT_SEARCH_PROVIDER=searxng \
   HOME=/tmp \
