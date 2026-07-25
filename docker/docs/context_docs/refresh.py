@@ -65,10 +65,12 @@ class RefreshCoordinator:
             vectors = await self.embedder.encode_documents(texts) if texts else []
             documents: list[PreparedDocument] = []
             source_host = (urlparse(response.resolved_url).hostname or "").lower()
-            for parsed_document, vector in zip(parsed.documents, vectors, strict=True):
+            for ordinal, (parsed_document, vector) in enumerate(zip(parsed.documents, vectors, strict=True)):
                 content_hash = hashlib.sha256(parsed_document.content.encode()).hexdigest()
+                # Include the ordinal so repeated section titles (common in large
+                # llms-full.txt feeds) cannot collide on the primary key.
                 identity = "\0".join(
-                    [source, parsed_document.canonical_url, parsed_document.heading_path, str(parsed_document.chunk_index)]
+                    [source, str(ordinal), parsed_document.canonical_url, parsed_document.heading_path, str(parsed_document.chunk_index)]
                 )
                 documents.append(
                     PreparedDocument(

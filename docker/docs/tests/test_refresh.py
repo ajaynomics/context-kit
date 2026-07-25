@@ -91,6 +91,24 @@ class RefreshTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(1, self.store.list_sources()[0].doc_count)
         self.assertTrue(self.store.lexical_search("Original", limit=5))
 
+    async def test_repeated_section_titles_index_without_id_collisions(self) -> None:
+        body = "# Basic syntax\n\nFirst variant.\n\n# Basic syntax\n\nSecond variant.\n"
+        fetcher = FakeFetcher([FakeFetch(200, body)])
+        coordinator = RefreshCoordinator(
+            store=self.store,
+            fetcher=fetcher,
+            embedder=FakeEmbedder(),
+            parser=parse_llms_text,
+            ttl_seconds=3600,
+            now=lambda: 100.0,
+        )
+
+        outcome = await coordinator.refresh(self.source, force=True)
+
+        self.assertEqual("updated", outcome.status)
+        self.assertEqual(2, outcome.document_count)
+        self.assertEqual(2, self.store.list_sources()[0].doc_count)
+
     async def test_empty_success_response_preserves_previous_content(self) -> None:
         fetcher = FakeFetcher(
             [
