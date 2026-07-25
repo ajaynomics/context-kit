@@ -4,10 +4,6 @@ ARG MCP_WEB_SEARCH_VERSION=1.3.0
 ARG MCP_WEB_SEARCH_MAX_BYTES=52428800
 ARG MCP_PROXY_VERSION=0.12.0
 
-COPY patch-mcp-web-search.mjs /tmp/patch-mcp-web-search.mjs
-COPY overrides/bing.js /tmp/context-kit-bing-provider.js
-COPY --chmod=0444 mcp-probe.mjs http-entrypoint.mjs /usr/local/lib/context-kit/
-
 # Chromium intentionally tracks Debian security updates inside the pinned base
 # image family; Bing's browser path is more likely to break with stale Chromium
 # than with patched OS packages.
@@ -23,13 +19,27 @@ RUN python3 -m venv /opt/mcp-proxy \
   && /opt/mcp-proxy/bin/pip install --no-cache-dir "mcp-proxy==${MCP_PROXY_VERSION}" \
   && /opt/mcp-proxy/bin/mcp-proxy --version
 
+COPY patch-mcp-web-search.mjs /tmp/patch-mcp-web-search.mjs
+COPY overrides/bing.js /tmp/context-kit-bing-provider.js
+COPY overrides/brave.js overrides/duckduckgo.js overrides/searxng.js overrides/registry.js overrides/diagnostics.mjs /tmp/context-kit-providers/
+COPY overrides/browser-fetch.js overrides/bounds.mjs /tmp/context-kit-fetch/
+COPY --chmod=0444 mcp-probe.mjs http-entrypoint.mjs /usr/local/lib/context-kit/
+
 RUN npm install -g "@zhafron/mcp-web-search@${MCP_WEB_SEARCH_VERSION}" \
   && cp /tmp/context-kit-bing-provider.js /usr/local/lib/node_modules/@zhafron/mcp-web-search/dist/src/providers/bing.js \
+  && cp /tmp/context-kit-providers/brave.js /usr/local/lib/node_modules/@zhafron/mcp-web-search/dist/src/providers/brave.js \
+  && cp /tmp/context-kit-providers/duckduckgo.js /usr/local/lib/node_modules/@zhafron/mcp-web-search/dist/src/providers/duckduckgo.js \
+  && cp /tmp/context-kit-providers/searxng.js /usr/local/lib/node_modules/@zhafron/mcp-web-search/dist/src/providers/searxng.js \
+  && cp /tmp/context-kit-providers/registry.js /usr/local/lib/node_modules/@zhafron/mcp-web-search/dist/src/providers/registry.js \
+  && cp /tmp/context-kit-providers/diagnostics.mjs /usr/local/lib/node_modules/@zhafron/mcp-web-search/dist/src/providers/diagnostics.js \
+  && cp /tmp/context-kit-fetch/browser-fetch.js /usr/local/lib/node_modules/@zhafron/mcp-web-search/dist/src/fetch/browser.js \
+  && cp /tmp/context-kit-fetch/bounds.mjs /usr/local/lib/node_modules/@zhafron/mcp-web-search/dist/src/fetch/bounds.js \
   && node /tmp/patch-mcp-web-search.mjs \
-  && rm /tmp/patch-mcp-web-search.mjs /tmp/context-kit-bing-provider.js \
+  && rm -rf /tmp/patch-mcp-web-search.mjs /tmp/context-kit-bing-provider.js /tmp/context-kit-providers /tmp/context-kit-fetch \
   && npm cache clean --force
 
-RUN chmod 0555 /usr/local/lib/context-kit
+RUN chmod -R a+rX /usr/local/lib/context-kit \
+      /usr/local/lib/node_modules/@zhafron/mcp-web-search
 
 ENV CHROME_PATH=/usr/bin/chromium \
   DEFAULT_SEARCH_PROVIDER=searxng \
@@ -37,6 +47,8 @@ ENV CHROME_PATH=/usr/bin/chromium \
   HTTP_TIMEOUT=15000 \
   MAX_BYTES=${MCP_WEB_SEARCH_MAX_BYTES} \
   MAX_RESULTS=10 \
+  MAX_PROVIDER_ATTEMPTS=4 \
+  SEARCH_PROVIDER_TIMEOUT_MS=15000 \
   PATH=/opt/mcp-proxy/bin:$PATH \
   SEARXNG_URL=http://searxng:8080 \
   XDG_CACHE_HOME=/tmp/.cache

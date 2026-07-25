@@ -1,0 +1,11 @@
+# Environment Variables
+
+Source: https://docs.example.test/environment
+
+`CONTEXT_KIT_EXACT_IDENTIFIER_20260724` enables the deterministic candidate fixture.
+
+# Durable Persistence
+
+Source: https://docs.example.test/persistence
+
+Checkpoints preserve graph state across process restarts.

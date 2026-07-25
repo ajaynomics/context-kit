@@ -259,7 +259,7 @@ new_case() {
   unset CONTEXT_KIT_DOCKER_CIDFILE CONTEXT_KIT_RUNTIME_DIR FAKE_DOCS_UID FAKE_WEB_UID \
     FAKE_REPLACEMENT_REQUIRED FAKE_RESTART_FAIL FAKE_DROP_RUNNING FAKE_SEARXNG_FAIL \
     FAKE_WEB_SEARCH_FAIL FAKE_DOCS_FAIL FAKE_LEGACY_CONTAINER FAKE_CLIENT_OWNER_MISMATCH \
-    FAKE_EXPECT_DOCS_SOURCES FAKE_EXPECT_DOCS_SOURCES_ABSENT
+    FAKE_EXPECT_DOCS_SOURCES FAKE_EXPECT_DOCS_SOURCES_ABSENT CONTEXT_KIT_DOCS_LOCAL_SOURCES_DIR
   mkdir -p "${FAKE_DOCKER_STATE}" "${HOME}"
   : > "${FAKE_DOCKER_LOG}"
 }
@@ -431,6 +431,34 @@ export CONTEXT_KIT_DOCS_SOURCES="${CASE_ROOT}/sources.txt"
 grep -F 'https://example.test/llms.txt' "${CONTEXT_KIT_DATA_DIR}/docs-sources.txt" >/dev/null \
   || fail_test "restart did not regenerate the bind-mounted docs source list"
 assert_no_docs_sources_artifacts
+
+new_case snapshot-promotion
+seed_service searxng
+seed_service web-search-mcp
+seed_service docs-mcp
+export CONTEXT_KIT_DOCS_LOCAL_SOURCES_DIR="${CASE_ROOT}/local-sources"
+mkdir -p "${CONTEXT_KIT_DOCS_LOCAL_SOURCES_DIR}/immich"
+printf '# source menu\n' > "${CONTEXT_KIT_DOCS_LOCAL_SOURCES_DIR}/immich/llms.txt"
+printf '# generated snapshot\n' > "${CONTEXT_KIT_DOCS_LOCAL_SOURCES_DIR}/immich/llms-full.txt"
+menu_hash="$(sha256sum "${CONTEXT_KIT_DOCS_LOCAL_SOURCES_DIR}/immich/llms.txt")"
+menu_hash="${menu_hash%% *}"
+output_hash="$(sha256sum "${CONTEXT_KIT_DOCS_LOCAL_SOURCES_DIR}/immich/llms-full.txt")"
+output_hash="${output_hash%% *}"
+printf '{"menu":"llms.txt","menu_sha256":"%s","output_sha256":"%s"}\n' \
+  "${menu_hash}" "${output_hash}" \
+  > "${CONTEXT_KIT_DOCS_LOCAL_SOURCES_DIR}/immich/llms-full.provenance.json"
+printf 'http://127.0.0.1:8769/immich/llms.txt\n' > "${CASE_ROOT}/sources.txt"
+export CONTEXT_KIT_DOCS_SOURCES="${CASE_ROOT}/sources.txt"
+"${CONTEXT_KIT}" restart
+grep -F 'http://127.0.0.1:8769/immich/llms-full.txt' "${CONTEXT_KIT_DATA_DIR}/docs-sources.txt" >/dev/null \
+  || fail_test "restart did not promote a local menu to its generated full snapshot"
+if grep -Fx 'http://127.0.0.1:8769/immich/llms.txt' "${CONTEXT_KIT_DATA_DIR}/docs-sources.txt" >/dev/null; then
+  fail_test "restart retained the menu URL despite an available full snapshot"
+fi
+printf '# inconsistent snapshot\n' > "${CONTEXT_KIT_DOCS_LOCAL_SOURCES_DIR}/immich/llms-full.txt"
+"${CONTEXT_KIT}" restart
+grep -Fx 'http://127.0.0.1:8769/immich/llms.txt' "${CONTEXT_KIT_DATA_DIR}/docs-sources.txt" >/dev/null \
+  || fail_test "restart promoted a snapshot whose provenance hash did not match"
 
 new_case restart-failure
 seed_service searxng stopped

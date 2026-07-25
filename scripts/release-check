@@ -267,7 +267,7 @@ bash -n scripts/release-check
 bash -n scripts/test-compose-upgrade.sh
 bash -n scripts/test-lifecycle.sh
 sh -n docker/docs/entrypoint.sh
-check_node docker/web-search/patch-mcp-web-search.mjs docker/web-search/overrides/bing.js docker/web-search/mcp-probe.mjs docker/web-search/http-entrypoint.mjs scripts/mcp-smoke-client.mjs scripts/smoke-web-search.mjs scripts/smoke-docs.mjs scripts/smoke-repomix.mjs scripts/test-web-search-http.mjs
+check_node docker/web-search/patch-mcp-web-search.mjs docker/web-search/overrides/bing.js docker/web-search/overrides/brave.js docker/web-search/overrides/browser-fetch.js docker/web-search/overrides/registry.js docker/web-search/mcp-probe.mjs docker/web-search/http-entrypoint.mjs scripts/docs-rebuild.mjs scripts/mcp-smoke-client.mjs scripts/smoke-web-search.mjs scripts/smoke-docs.mjs scripts/smoke-repomix.mjs scripts/test-docs-candidate.mjs scripts/test-web-search-candidate.mjs scripts/test-web-search-http.mjs scripts/test-web-search-quality.mjs
 
 node -e 'const fs=require("node:fs"); JSON.parse(fs.readFileSync("snippets/opencode.json", "utf8")); JSON.parse(fs.readFileSync("snippets/claude.mcp.json", "utf8"));'
 CONTEXT_KIT_WEB_SEARCH_HTTP_URL="http://127.0.0.1:8777/mcp" CONTEXT_KIT_DOCS_HTTP_URL="http://127.0.0.1:8776/mcp" bin/context-kit install opencode > "${tmp_dir}/opencode-default.json"
@@ -296,6 +296,8 @@ assert_redaction_check_does_not_disclose_matches
 bash scripts/test-compose-upgrade.sh
 bash scripts/test-lifecycle.sh
 node scripts/test-web-search-http.mjs
+node scripts/test-web-search-quality.mjs
+python3 scripts/test-doc-snapshots.py
 
 bin/context-kit redaction-check
 docker compose -p "${CONTEXT_KIT_COMPOSE_PROJECT}" -f compose.yml config >/dev/null
@@ -313,6 +315,12 @@ assert_hostile_requests_rejected
 node scripts/smoke-web-search.mjs bin/context-kit web-search
 node scripts/smoke-docs.mjs bin/context-kit docs
 node scripts/smoke-repomix.mjs bin/context-kit repomix
+docker run --rm --entrypoint python "${CONTEXT_KIT_DOCS_IMAGE}" -m unittest discover -s /opt/context-kit/tests -t /opt/context-kit
+CONTEXT_KIT_DOCS_CANDIDATE_IMAGE="${CONTEXT_KIT_DOCS_IMAGE}" \
+  CONTEXT_KIT_DOCS_TEST_MODELS="${CONTEXT_KIT_DATA_DIR}/models" \
+  bash scripts/test-docs-candidate.sh
+CONTEXT_KIT_WEB_SEARCH_CANDIDATE_IMAGE="${CONTEXT_KIT_WEB_SEARCH_IMAGE}" \
+  bash scripts/test-web-search-candidate.sh
 assert_web_search_backend_supervision
 
 printf 'pass release-check\n'

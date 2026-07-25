@@ -10,8 +10,8 @@ Context Kit gives coding agents three local tools:
 
 | Tool | Purpose |
 |---|---|
-| `context-web-search` | Current web search through local SearXNG plus URL fetch/extract |
-| `context-docs` | Semantic search over curated `llms.txt` documentation |
+| `context-web-search` | Current web search with fallback diagnostics plus safe HTTP/browser extraction |
+| `context-docs` | Persisted hybrid lexical/semantic search over curated documentation |
 | `context-repomix` | Pack repositories into AI-friendly context |
 
 The first public release deliberately keeps the surface area small: web search,
@@ -67,9 +67,12 @@ config that will not be committed.
   labeled per launcher process and remove only themselves.
 - Web search uses stateless MCP HTTP sessions, validates Host, rejects every
   supplied Origin, and exits for Docker restart if its stdio backend dies.
+- Explicit `fetch_url engine=browser` renders JavaScript while routing every
+  network GET through the same DNS/private-address checks as HTTP fetching.
 - `context-docs` browser CORS is disabled by default; set exact local origins
   only when a browser-based client needs direct access.
-- Docs and model caches live in `$HOME/.local/share/context-kit`.
+- Docs use a transactional SQLite WAL/FTS5 index; docs and model caches live in
+  `$HOME/.local/share/context-kit` and survive container replacement.
 - Docs refresh TTL defaults to `24h`.
 - Repomix mounts only the current project read-only.
 - No code-editing MCP server is enabled by default.
@@ -98,7 +101,7 @@ machine adds extra local menus, they affect only that machine's running
 
 ## Docs Sources
 
-The default docs index is intentionally small:
+The default docs index uses the vendors' content-bearing `llms-full.txt` feeds:
 
 - Claude Code docs
 - OpenAI API docs and reference
@@ -121,6 +124,17 @@ CONTEXT_KIT_DOCS_SOURCES="config/sources.default.txt config/sources.js.txt" \
 Source changes are loaded by `start`/`restart`; `bin/context-kit docs` is only a
 stdio bridge to the already-running docs service.
 
+`docs_query` searches with FTS5 plus embeddings, deduplicates exact content,
+and supports source/host filters. It returns snippets but does not retrieve full
+content unless IDs are requested or `auto_retrieve` is explicitly enabled.
+`bin/context-kit docs-rebuild` safely replaces selected source generations only
+after fetch, parse, and embedding succeed.
+
+For machine-local menu files, `bin/context-kit docs-snapshot` fetches their
+linked pages into deterministic sibling `llms-full.txt` files with a provenance
+manifest and conditional-request cache. Lifecycle commands automatically prefer
+that full snapshot while preserving a prior snapshot if regeneration fails.
+
 Large vendor feeds are opt-in because they can expand to thousands of sections
 and take a while to embed.
 
@@ -135,6 +149,8 @@ bin/context-kit doctor
 bin/context-kit install claude
 bin/context-kit install opencode
 bin/context-kit redaction-check
+bin/context-kit docs-snapshot
+bin/context-kit docs-rebuild
 ```
 
 MCP entrypoints:

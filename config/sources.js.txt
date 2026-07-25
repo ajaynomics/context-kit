@@ -1,7 +1,7 @@
 # Optional JavaScript / frontend docs.
 
-https://ai-sdk.dev/llms.txt
-https://nextjs.org/docs/llms.txt
-https://orm.drizzle.team/llms.txt
-https://svelte.dev/llms.txt
-https://hono.dev/llms.txt
+https://ai-sdk.dev/llms-full.txt
+https://nextjs.org/docs/llms-full.txt
+https://orm.drizzle.team/llms-full.txt
+https://svelte.dev/llms-full.txt
+https://hono.dev/llms-full.txt

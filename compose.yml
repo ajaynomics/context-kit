@@ -36,6 +36,9 @@ services:
       HTTP_TIMEOUT: "${CONTEXT_KIT_WEB_SEARCH_HTTP_TIMEOUT:-15000}"
       MAX_BYTES: "${CONTEXT_KIT_WEB_SEARCH_MAX_BYTES:-52428800}"
       MAX_RESULTS: "${CONTEXT_KIT_WEB_SEARCH_MAX_RESULTS:-10}"
+      MAX_PROVIDER_ATTEMPTS: "${CONTEXT_KIT_WEB_SEARCH_MAX_PROVIDER_ATTEMPTS:-4}"
+      SEARCH_PROVIDER_TIMEOUT_MS: "${CONTEXT_KIT_WEB_SEARCH_PROVIDER_TIMEOUT:-15000}"
+      BRAVE_SEARCH_API_KEY: "${CONTEXT_KIT_BRAVE_SEARCH_API_KEY:-}"
       BROWSER_SEARCH_USER_AGENT: "${CONTEXT_KIT_WEB_SEARCH_BROWSER_USER_AGENT:-}"
       MCP_COMPAT_MODE: "${CONTEXT_KIT_WEB_SEARCH_MCP_COMPAT_MODE:-}"
     healthcheck:
@@ -54,8 +57,8 @@ services:
     build:
       context: ./docker/docs
     image: ${CONTEXT_KIT_DOCS_IMAGE:-context-kit/docs-mcp:latest}
-    # Long-lived shared docs MCP. One container = one Chroma writer; clients
-    # connect over Streamable HTTP (mcp-proxy bridges llms-txt-mcp's stdio).
+    # Long-lived shared docs MCP. One container owns the transactional SQLite
+    # index and embedding model; clients connect over Streamable HTTP.
     restart: unless-stopped
     ports:
       - "127.0.0.1:${CONTEXT_KIT_DOCS_PORT:-8776}:8000"

@@ -1,9 +1,8 @@
 #!/bin/sh
 # context-kit docs-mcp entrypoint.
 #
-# Bridges llms-txt-mcp (stdio-only) to Streamable HTTP via mcp-proxy so that
-# multiple clients share a single long-lived indexer instead of each spawning
-# their own container (and racing on the same Chroma store).
+# Starts the in-repo Streamable HTTP server. Multiple clients share one
+# transactional SQLite/FTS index and one lazily loaded embedding model.
 #
 # Sources are read from $DOCS_MCP_SOURCES_FILE (one URL per line; `#` comments
 # and blank lines are allowed). Everything else is configured via env vars
@@ -52,19 +51,9 @@ import http.server
 import sys
 
 
-class LocalSourceHandler(http.server.SimpleHTTPRequestHandler):
-    def send_head(self):
-        # llms-txt-mcp 0.2.0 treats 304 responses from local sources as fetch
-        # failures, so serve machine-local docs as plain 200 responses.
-        for header in ("If-Modified-Since", "If-None-Match"):
-            if header in self.headers:
-                del self.headers[header]
-        return super().send_head()
-
-
 port = int(sys.argv[1])
 directory = sys.argv[2]
-handler = functools.partial(LocalSourceHandler, directory=directory)
+handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=directory)
 with http.server.ThreadingHTTPServer(("127.0.0.1", port), handler) as server:
     server.serve_forever()
 PY
@@ -93,32 +82,4 @@ PY
   fi
 fi
 
-# By default llms-txt-mcp 0.2.0 re-embeds every source on launch (the actual
-# default is a background preindex, --no-preindex only disables the foreground
-# variant). On a long-lived container that wastes CPU per restart, so we disable
-# BOTH. Missing/stale sources still refresh on first docs_query/docs_refresh.
-# Set DOCS_MCP_PREINDEX=1 to restore eager startup indexing.
-preindex_flag="--no-preindex --no-background-preindex"
-if [ "${DOCS_MCP_PREINDEX:-0}" = "1" ]; then
-  preindex_flag=""
-fi
-
-allow_origin_args=""
-if [ -n "${DOCS_MCP_ALLOW_ORIGIN:-}" ]; then
-  allow_origin_args="--allow-origin ${DOCS_MCP_ALLOW_ORIGIN}"
-fi
-
-# shellcheck disable=SC2086  # intentional word-splitting on $sources / $preindex_flag / $allow_origin_args
-exec mcp-proxy \
-  --host "${DOCS_MCP_HTTP_HOST:-0.0.0.0}" \
-  --port "${DOCS_MCP_HTTP_PORT:-8000}" \
-  --pass-environment \
-  $allow_origin_args \
-  -- \
-  llms-txt-mcp \
-    --store-path /data \
-    --ttl "${DOCS_MCP_TTL:-24h}" \
-    --max-get-bytes "${DOCS_MCP_MAX_GET_BYTES:-75000}" \
-    --embed-model "${DOCS_MCP_EMBED_MODEL:-BAAI/bge-small-en-v1.5}" \
-    $preindex_flag \
-    $sources
+exec python -m context_docs

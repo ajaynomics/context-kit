@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 const protocolVersion = "2024-11-05";
 const expectedTools = ["fetch_url", "search_web"];
 
-async function rpc(url, id, method, params = {}, timeoutMs = 5000) {
+export async function rpc(url, id, method, params = {}, timeoutMs = 5000) {
   const response = await fetch(url, {
     method: "POST",
     headers: {
@@ -29,7 +29,7 @@ async function rpc(url, id, method, params = {}, timeoutMs = 5000) {
   return payload.result;
 }
 
-export async function probeMcp(url, { timeoutMs = 5000 } = {}) {
+export async function probeMcp(url, { timeoutMs = 5000, expectedTools: requiredTools = expectedTools } = {}) {
   const initialized = await rpc(url, 1, "initialize", {
     protocolVersion,
     capabilities: {},
@@ -39,7 +39,7 @@ export async function probeMcp(url, { timeoutMs = 5000 } = {}) {
 
   const listed = await rpc(url, 2, "tools/list", {}, timeoutMs);
   const names = new Set((listed?.tools || []).map(tool => tool.name));
-  for (const name of expectedTools) {
+  for (const name of requiredTools) {
     if (!names.has(name)) throw new Error(`tools/list omitted ${name}`);
   }
   return Array.from(names).sort();

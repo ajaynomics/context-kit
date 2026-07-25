@@ -1,4 +1,4 @@
-import { requireToolSuccess, runSmoke } from "./mcp-smoke-client.mjs";
+import { requireToolSuccess, runSmoke, textFrom } from "./mcp-smoke-client.mjs";
 
 const live = process.env.CONTEXT_KIT_LIVE_CHECKS === "1";
 const localSourceSmokeUrl = process.env.CONTEXT_KIT_LOCAL_SOURCE_SMOKE_URL;
@@ -12,7 +12,8 @@ runSmoke({
     const toolNames = await client.requireTools(["docs_query", "docs_sources"]);
 
     const sources = requireToolSuccess("docs_sources", await client.callTool("docs_sources"));
-    if (!Array.isArray(sources?.structuredContent?.result)) {
+    const sourcesPayload = sources?.structuredContent || JSON.parse(textFrom(sources) || "null");
+    if (typeof sourcesPayload?.source_count !== "number") {
       const sourcesText = JSON.stringify(sources);
       throw new Error(`docs_sources returned unexpected payload: ${sourcesText.slice(0, 500)}`);
     }

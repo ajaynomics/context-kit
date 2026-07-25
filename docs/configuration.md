@@ -64,6 +64,9 @@ Only the variables below are part of the public configuration surface. Other
 | `CONTEXT_KIT_WEB_SEARCH_PROVIDER` | `searxng` | Default `search_web` provider; fallback order depends on this provider |
 | `CONTEXT_KIT_WEB_SEARCH_HTTP_TIMEOUT` | `15000` | HTTP timeout in milliseconds for search providers |
 | `CONTEXT_KIT_WEB_SEARCH_MAX_RESULTS` | `10` | Default search result count when clients omit `limit` |
+| `CONTEXT_KIT_WEB_SEARCH_MAX_PROVIDER_ATTEMPTS` | `4` | Maximum providers attempted for one search |
+| `CONTEXT_KIT_WEB_SEARCH_PROVIDER_TIMEOUT` | `15000` | Per-provider diagnostic timeout in milliseconds |
+| `CONTEXT_KIT_BRAVE_SEARCH_API_KEY` | unset | Optional Brave Search API fallback credential |
 | `CONTEXT_KIT_WEB_SEARCH_CHROME_PATH` | `/usr/bin/chromium` | Chromium path inside the web-search image for Bing fallback |
 | `CONTEXT_KIT_WEB_SEARCH_BROWSER_USER_AGENT` | bundled Chrome/Linux UA | User agent for the Chromium-backed Bing fallback |
 | `CONTEXT_KIT_WEB_SEARCH_MCP_COMPAT_MODE` | unset | Set to `legacy` for MCP clients with weak tool-schema parsers |
@@ -74,7 +77,7 @@ Only the variables below are part of the public configuration surface. Other
 | `CONTEXT_KIT_DOCS_SOURCES` | `config/sources.default.txt` | Space-separated source profile files |
 | `CONTEXT_KIT_DOCS_MAX_GET_BYTES` | `75000` | Max bytes returned by docs retrieval |
 | `CONTEXT_KIT_DOCS_EMBED_MODEL` | `BAAI/bge-small-en-v1.5` | SentenceTransformers embedding model |
-| `CONTEXT_KIT_DOCS_PREINDEX` | `0` | Set to `1` to re-embed every source on container start |
+| `CONTEXT_KIT_DOCS_PREINDEX` | `0` | Set to `1` to refresh stale/missing sources in the background on startup |
 | `CONTEXT_KIT_DOCS_LOCAL_SOURCES_DIR` | `${CONTEXT_KIT_DATA_DIR}/local-sources` | Machine-local llms.txt tree mounted read-only into docs-mcp |
 | `CONTEXT_KIT_DOCS_LOCAL_SOURCES_PORT` | `8769` | Loopback port inside docs-mcp for serving local source files |
 
@@ -136,6 +139,10 @@ same-ID `restart` does not apply a changed TTL; it takes effect only when a new
 container is explicitly provisioned. When freshness matters for one task,
 prefer `docs_refresh` instead of replacing the shared container.
 
+Use `bin/context-kit docs-rebuild [SOURCE_URL ...]` after parser/model changes or
+to force an atomic rebuild. Existing searchable generations remain available if
+a source fetch, parse, or embedding step fails.
+
 ## Browser CORS
 
 `context-docs` disables browser CORS by default. CLI assistants and server-side
@@ -172,3 +179,10 @@ For local llms.txt files, place content under
 `http://127.0.0.1:8769/path/inside/local-sources/llms.txt` or another URL that
 ends in `/llms.txt` or `/llms-full.txt`; that loopback URL is inside the docs-mcp
 container, not exposed on the host.
+
+Run `bin/context-kit docs-snapshot [--only DIRECTORY]` to materialize linked
+local menus. Each successful directory gets `llms-full.txt` and
+`llms-full.provenance.json`; cache validators live under
+`${CONTEXT_KIT_DATA_DIR}/snapshot-cache`. `--offline` rebuilds only from that
+cache. During `start`/`restart`, a local `/llms.txt` URL is automatically changed
+to its sibling `/llms-full.txt` when that file exists.

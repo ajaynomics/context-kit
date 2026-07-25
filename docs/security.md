@@ -10,6 +10,11 @@ Context Kit is designed to be safe by default for local development.
 - The web-search MCP image runs as the non-root `node` user.
 - Web-search MCP sessions are stateless. Its HTTP front end permits only
   loopback/internal Host values and rejects every supplied Origin with 403.
+- Browser fetch intercepts each network GET, resolves it outside Chromium, and
+  blocks private/localhost addresses, non-GET requests, request-count overflow,
+  and byte-budget overflow. Redirect targets are checked independently.
+- Search diagnostics contain bounded categorized error messages and never emit
+  the optional Brave credential.
 - Repomix mounts only the current project read-only.
 - Docs indexing stores data under `$HOME/.local/share/context-kit` unless you
   override it.
@@ -26,6 +31,11 @@ obey instructions embedded in it.
 Only index sources you trust enough to retrieve into an agent conversation. More
 sources are not always better. Large or noisy docs can make retrieval slower and
 less precise.
+
+Docs source replacement is transactional. SQLite WAL state persists on the docs
+volume, removed source profiles become inactive immediately, and full content is
+not returned by default. Local snapshot provenance is stored separately from the
+retrieval text so metadata does not pollute ranking.
 
 ## Code-Editing MCP Servers
 

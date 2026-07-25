@@ -92,6 +92,8 @@ Usage:
   context-kit status                Show services, images, sources, and shared HTTP endpoints
   context-kit doctor                Check Docker, services, images, sources, and HTTP endpoints
   context-kit redaction-check       Scan this repo for local paths and secret patterns
+  context-kit docs-snapshot         Build deterministic llms-full.txt local snapshots
+  context-kit docs-rebuild [URL...] Rebuild all or selected configured docs sources
 
 MCP server commands:
   context-kit web-search            Stdio bridge to the shared web-search service
@@ -510,16 +512,41 @@ source_files() {
 }
 
 resolved_sources() {
-  local file line
+  local file line local_prefix relative full_path
+  local_prefix="http://127.0.0.1:${DOCS_LOCAL_SOURCES_PORT}/"
   while IFS= read -r file; do
     [[ -f "${file}" ]] || fail "docs source file not found: ${file}"
     while IFS= read -r line; do
       line="${line%%#*}"
       line="${line//[$'\t\r\n ']/}"
       [[ -z "${line}" ]] && continue
+      if [[ "${line}" == "${local_prefix}"*'/llms.txt' ]]; then
+        relative="${line#"${local_prefix}"}"
+        full_path="${DOCS_LOCAL_SOURCES_DIR}/${relative%llms.txt}llms-full.txt"
+        if [[ -f "${full_path}" ]] \
+          && python3 "${ROOT}/scripts/docs_snapshot.py" --validate-output "${full_path}" >/dev/null 2>&1; then
+          line="${line%llms.txt}llms-full.txt"
+        fi
+      fi
       printf '%s\n' "${line}"
     done < "${file}"
   done < <(source_files)
+}
+
+cmd_docs_snapshot() {
+  python3 "${ROOT}/scripts/docs_snapshot.py" \
+    --source-root "${DOCS_LOCAL_SOURCES_DIR}" \
+    --cache-dir "${DATA_DIR}/snapshot-cache" \
+    "$@"
+}
+
+cmd_docs_rebuild() {
+  require_docker
+  require_network
+  if ! shared_service_running "${DOCS_SERVICE_NAME}"; then
+    fail "long-lived docs-mcp not running; start it with: context-kit start"
+  fi
+  node "${ROOT}/scripts/docs-rebuild.mjs" "${DOCS_HTTP_URL}" "$@"
 }
 
 cmd_build() {
@@ -847,7 +874,7 @@ cmd_docs() {
   # This stdio entrypoint is kept for clients that cannot speak HTTP MCP:
   # it spawns a thin mcp-proxy bridge per call but all calls multiplex onto
   # the single long-lived docs-mcp container over the Context Kit Docker
-  # network (no Chroma write contention, no host networking).
+  # network (no concurrent index writers, no host networking).
   require_docker
   require_network
   require_image "${DOCS_IMAGE}" "context-kit build"
@@ -1011,6 +1038,8 @@ case "${1:-}" in
   doctor) shift; cmd_doctor "$@" ;;
   web-search) shift; cmd_web_search "$@" ;;
   docs) shift; cmd_docs "$@" ;;
+  docs-snapshot) shift; cmd_docs_snapshot "$@" ;;
+  docs-rebuild) shift; cmd_docs_rebuild "$@" ;;
   repomix) shift; cmd_repomix "$@" ;;
   install) shift; cmd_install "$@" ;;
   redaction-check) shift; cmd_redaction_check "$@" ;;

@@ -133,9 +133,15 @@ race result rendering and return no items even when Chromium sees Bing result
 cards. The override waits for result cards and decodes current Bing redirect
 URLs before handing results back to the upstream fallback registry.
 
-`fetch_url` is different: in upstream `mcp-web-search` 1.3.0, `engine=browser` is
-accepted but reserved for future support. It does not currently invoke Chromium;
-URL fetching uses the HTTP extractor path.
+`search_web` now returns bounded `diagnostics.attempts` entries. Check each
+provider's `status`, `duration_ms`, `result_count`, and categorized error before
+changing provider order. An optional Brave API fallback is enabled only when
+`CONTEXT_KIT_BRAVE_SEARCH_API_KEY` is set.
+
+`fetch_url engine=browser` invokes Chromium for JavaScript-rendered pages. Every
+HTTP(S) GET is intercepted and fetched through vetted DNS addresses; non-GET
+requests, private/localhost destinations, more than 100 requests, and more than
+20 MiB total browser traffic are blocked. Use `engine=http` for ordinary pages.
 
 ## Docs Indexing Is Slow
 
@@ -147,11 +153,10 @@ Cloudflare and other large docs sets can take significantly longer than the
 default source profile. Set `CONTEXT_KIT_DOCS_PREINDEX=1` only if you want
 startup to eagerly embed every configured source.
 
-## Docs Tools Say Index Manager Not Initialized
+## Docs Sources Report Refresh Errors
 
-If `docs_query` or `docs_refresh` returns `Index manager not initialized` while
-`/status` still responds, the HTTP wrapper is up but `llms-txt-mcp` failed to
-initialize its embedding model or Chroma database. Check the container logs:
+If `docs_sources` reports `last_error`, the service keeps the previous generation
+searchable and records the failed check. Check the container logs:
 
 ```sh
 docker compose -p "${CONTEXT_KIT_COMPOSE_PROJECT:-context-kit}" -f compose.yml logs docs-mcp
@@ -173,7 +178,7 @@ sudo chown -R "$(id -u):$(id -g)" "$DATA_DIR/docs" "$DATA_DIR/models"
 bin/context-kit restart
 ```
 
-`bin/context-kit start` now pre-creates these directories and `doctor` reports
-existing directories that are not writable by the current user. If an assistant
-client reports `Session not found` after restarting `docs-mcp`, restart the
-assistant so it opens a fresh Streamable HTTP MCP session.
+`bin/context-kit start` pre-creates these directories and `doctor` reports
+existing directories that are not writable by the current user. The docs MCP
+uses stateless HTTP sessions, so clients do not retain a session ID across calls.
+Use `bin/context-kit docs-rebuild` after fixing the underlying error.

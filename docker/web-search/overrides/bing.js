@@ -43,7 +43,7 @@ export class BingProvider {
     }
   }
 
-  async search(q, limit, lang) {
+  async search(q, limit, lang, signal) {
     const cacheKey = createCacheKey("bing", q, limit, lang);
     const cached = searchCache.get(cacheKey);
     if (cached)
@@ -51,7 +51,10 @@ export class BingProvider {
     const market = getMarketFromLang(lang);
     const results = await browserPool.withBrowser(async (browser) => {
       const page = await browser.newPage();
+      const abort = () => void page.close().catch(() => undefined);
+      signal?.addEventListener("abort", abort, { once: true });
       try {
+        signal?.throwIfAborted();
         await page.setViewport({ width: 1365, height: 768 });
         await page.setUserAgent(DEFAULT_BROWSER_SEARCH_USER_AGENT);
         await page.setExtraHTTPHeaders(getAcceptLanguageHeader(lang));
@@ -95,7 +98,8 @@ export class BingProvider {
         });
       }
       finally {
-        await page.close();
+        signal?.removeEventListener("abort", abort);
+        if (!page.isClosed()) await page.close();
       }
     });
     searchCache.set(cacheKey, results);
