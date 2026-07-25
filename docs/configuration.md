@@ -17,8 +17,7 @@ Tracked public files:
 - `config/sources.*.txt`: optional public source profiles.
 - `snippets/`: portable assistant config snippets that use `context-kit` on
   `PATH`.
-- `compose.yml`, `docker/`, `bin/`, and `scripts/`: generic runtime and release
-  logic.
+- `compose.yml`, `docker/`, `bin/`, and `scripts/check`: generic runtime logic.
 
 Ignored or external local files:
 
@@ -50,8 +49,7 @@ host.
 
 ## User-Facing Variables
 
-Only the variables below are part of the public configuration surface. Other
-`CONTEXT_KIT_*` variables used by scripts are release/test hooks and may change.
+The variables below are the supported public configuration surface.
 
 | Variable | Default | Purpose |
 |---|---|---|

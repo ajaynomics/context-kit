@@ -9,19 +9,6 @@ bin/context-kit doctor
 This checks Docker, Compose, images, the Docker network, SearXNG health, docs
 HTTP readiness, and docs source configuration.
 
-For release-grade MCP protocol checks, run:
-
-```sh
-scripts/release-check
-```
-
-Live provider checks are opt-in because search engines, remote docs, and model
-downloads can fail independently of this repo:
-
-```sh
-CONTEXT_KIT_LIVE_CHECKS=1 scripts/release-check
-```
-
 ## SearXNG Is Not Responding
 
 Start it:

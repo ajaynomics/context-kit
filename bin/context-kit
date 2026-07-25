@@ -83,7 +83,6 @@ Usage:
   context-kit build                 Build MCP images
   context-kit status                Show services, images, sources, and the docs HTTP endpoint
   context-kit doctor                Check Docker, services, images, sources, and HTTP endpoints
-  context-kit redaction-check       Scan this repo for local paths and secret patterns
 
 MCP server commands:
   context-kit web-search            Per-call SearXNG-backed web-search MCP (stdio)
@@ -166,17 +165,6 @@ check_data_dirs() {
 
 warn() {
   printf 'warn: %s\n' "$*" >&2
-}
-
-print_relative_paths() {
-  local path
-  while IFS= read -r path; do
-    [[ -n "${path}" ]] || continue
-    if [[ "${path}" == "${ROOT}/"* ]]; then
-      path="${path#"${ROOT}/"}"
-    fi
-    printf '%s\n' "${path}"
-  done
 }
 
 json_escape() {
@@ -550,50 +538,6 @@ cmd_install() {
   esac
 }
 
-cmd_redaction_check() {
-  local bad=0
-  local scan_paths=("${ROOT}")
-  if [[ "$#" -gt 0 ]]; then
-    scan_paths=("$@")
-  fi
-  local local_path_terms='/(home|Users)/[^/[:space:]]+|/data/(projects|opencode-mcp)[^[:space:]]*|[A-Za-z]:\\Users\\[^\\[:space:]]+'
-  local secret_terms='AKIA[0-9A-Z]{16}|BEGIN (RSA |OPENSSH |EC |DSA )?PRIVATE KEY|xox[baprs]-|sk-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{20,}|gitea_[A-Za-z0-9_-]{20,}'
-
-  # Scan only what would be published: skip .git plus everything .gitignore
-  # excludes by convention (local .env files, caches, logs).
-  local grep_opts=(
-    -RInE
-    --exclude-dir=.git
-    --exclude-dir=.cache
-    --exclude-dir=tmp
-    --exclude=.env
-    --exclude=.env.local
-    --exclude=*.log
-  )
-
-  local matches
-  matches="$(grep "${grep_opts[@]}" --files-with-matches "${local_path_terms}" "${scan_paths[@]}" 2>/dev/null || true)"
-  if [[ -n "${matches}" ]]; then
-    printf 'fail redaction-check found local path patterns in:\n' >&2
-    printf '%s\n' "${matches}" | print_relative_paths | sed 's/^/- /' >&2
-    bad=1
-  fi
-
-  matches="$(grep "${grep_opts[@]}" --files-with-matches "${secret_terms}" "${scan_paths[@]}" 2>/dev/null || true)"
-  if [[ -n "${matches}" ]]; then
-    printf 'fail redaction-check found secret-like patterns in:\n' >&2
-    printf '%s\n' "${matches}" | print_relative_paths | sed 's/^/- /' >&2
-    bad=1
-  fi
-
-  if [[ "${bad}" -eq 0 ]]; then
-    printf 'pass redaction-check found no local absolute paths or common secret patterns\n'
-  else
-    printf 'fail redaction-check found blocked content\n' >&2
-  fi
-  return "${bad}"
-}
-
 case "${1:-}" in
   start) shift; cmd_start "$@" ;;
   stop) shift; cmd_stop "$@" ;;
@@ -605,7 +549,6 @@ case "${1:-}" in
   docs) shift; cmd_docs "$@" ;;
   repomix) shift; cmd_repomix "$@" ;;
   install) shift; cmd_install "$@" ;;
-  redaction-check) shift; cmd_redaction_check "$@" ;;
   -h|--help|help|"") usage ;;
   *) usage >&2; exit 64 ;;
 esac

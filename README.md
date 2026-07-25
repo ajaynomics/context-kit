@@ -126,7 +126,6 @@ bin/context-kit status
 bin/context-kit doctor
 bin/context-kit install claude
 bin/context-kit install opencode
-bin/context-kit redaction-check
 ```
 
 MCP entrypoints:
