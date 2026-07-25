@@ -5,6 +5,7 @@ import os
 import re
 import time
 from contextlib import asynccontextmanager
+from typing import Any
 from pathlib import Path
 
 import uvicorn
@@ -93,7 +94,7 @@ def build_server():
         merge: bool = False,
         sources: list[str] | None = None,
         hosts: list[str] | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Search docs. Content retrieval is explicit by default; optionally filter source URLs or hosts."""
         return await service.query(
             query, limit, auto_retrieve, auto_retrieve_threshold, auto_retrieve_limit,
@@ -105,7 +106,7 @@ def build_server():
         source: str | None = None,
         sources: list[str] | None = None,
         force: bool = False,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Refresh configured sources transactionally; concurrent requests are coalesced."""
         if source and sources:
             raise ValueError("pass source or sources, not both")
@@ -114,7 +115,7 @@ def build_server():
         return await service.refresh(sources, force)
 
     @mcp.tool()
-    async def docs_sources() -> dict:
+    async def docs_sources() -> dict[str, Any]:
         """Report configured-source freshness, errors, and document counts."""
         return service.source_status()
 
@@ -122,7 +123,7 @@ def build_server():
     async def docs_rebuild(
         source: str | None = None,
         sources: list[str] | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Force a safe source rebuild without deleting the last good generation first."""
         if source and sources:
             raise ValueError("pass source or sources, not both")
