@@ -23,15 +23,19 @@ export class ProviderRegistry {
     return this.providers.get(name);
   }
 
-  async searchWithFallback(q, limit, lang, preferredProvider) {
+  async searchWithFallback(q, limit, lang, preferredProvider, signal) {
     const defaultProvider = preferredProvider || DEFAULT_SEARCH_PROVIDER;
     const order = [defaultProvider, ...PROVIDERS.filter(name => name !== defaultProvider)].slice(0, MAX_PROVIDER_ATTEMPTS);
     const attempts = [];
     const started = performance.now();
     for (const providerName of order) {
+      signal?.throwIfAborted();
       const provider = this.providers.get(providerName);
       if (!provider) continue;
-      const attempt = await attemptProvider(provider, q, limit, lang, { timeoutMs: PROVIDER_TIMEOUT_MS });
+      const attempt = await attemptProvider(provider, q, limit, lang, {
+        timeoutMs: PROVIDER_TIMEOUT_MS,
+        signal
+      });
       attempts.push(attempt.diagnostic);
       if (attempt.items.length) {
         return {

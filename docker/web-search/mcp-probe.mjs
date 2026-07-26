@@ -3,7 +3,8 @@ import { fileURLToPath } from "node:url";
 const protocolVersion = "2024-11-05";
 const expectedTools = ["fetch_url", "search_web"];
 
-export async function rpc(url, id, method, params = {}, timeoutMs = 5000) {
+export async function rpc(url, id, method, params = {}, timeoutMs = 5000, signal) {
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
   const response = await fetch(url, {
     method: "POST",
     headers: {
@@ -12,7 +13,7 @@ export async function rpc(url, id, method, params = {}, timeoutMs = 5000) {
       "MCP-Protocol-Version": protocolVersion
     },
     body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
-    signal: AbortSignal.timeout(timeoutMs)
+    signal: signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal
   });
   const text = await response.text();
   if (!response.ok) throw new Error(`${method} returned HTTP ${response.status}: ${text.slice(0, 300)}`);

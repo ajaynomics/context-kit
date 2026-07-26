@@ -1,6 +1,7 @@
 import http from "node:http";
 
 let websocketUpgrades = 0;
+let slowRequests = 0;
 
 const server = http.createServer((request, response) => {
   const url = new URL(request.url, "http://mock-search.test");
@@ -21,6 +22,23 @@ const server = http.createServer((request, response) => {
       <body><main id="content">initial content</main>
       <script>document.getElementById("content").textContent = "BROWSER_RENDERED_MARKER";</script>
       </body></html>`);
+    return;
+  }
+  if (url.pathname === "/slow") {
+    slowRequests += 1;
+    let closed = false;
+    response.once("close", () => {
+      if (closed) return;
+      closed = true;
+      slowRequests -= 1;
+    });
+    response.writeHead(200, { "Content-Type": "text/plain" });
+    response.write("pending");
+    return;
+  }
+  if (url.pathname === "/slow-count") {
+    response.writeHead(200, { "Content-Type": "text/plain" });
+    response.end(String(slowRequests));
     return;
   }
   if (url.pathname === "/redirect-private") {

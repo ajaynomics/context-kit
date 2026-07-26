@@ -88,13 +88,22 @@ export function createSecureMcpServer({ upstream = defaultUpstream, probe = prob
       path: request.url,
       headers: copyRequestHeaders(request.headers, target.host)
     }, upstreamResponse => {
+      upstreamResponse.on("error", () => response.destroy());
       response.writeHead(
         upstreamResponse.statusCode || 502,
         copyResponseHeaders(upstreamResponse.headers)
       );
       upstreamResponse.pipe(response);
     });
+    const abortUpstream = () => {
+      if (!upstreamRequest.destroyed) upstreamRequest.destroy(new Error("downstream disconnected"));
+    };
+    request.once("aborted", abortUpstream);
+    response.once("close", () => {
+      if (!response.writableEnded) abortUpstream();
+    });
     upstreamRequest.on("error", error => {
+      if (response.destroyed) return;
       if (!response.headersSent) response.writeHead(502, { "Content-Type": "text/plain" });
       response.end(`backend unavailable: ${error.message}`);
     });
@@ -120,6 +129,23 @@ export function superviseBackend({ probe, intervalMs = 10000, onFailure }) {
     stopped = true;
     clearTimeout(timer);
   };
+}
+
+export async function terminateChild(child, { graceMs = 3000 } = {}) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  const gracefulExit = once(child, "exit").then(() => true);
+  child.kill("SIGTERM");
+  const exited = await Promise.race([
+    gracefulExit,
+    delay(graceMs).then(() => false)
+  ]);
+  if (exited || child.exitCode !== null || child.signalCode !== null) return;
+
+  const forcedExit = once(child, "exit");
+  if (!child.kill("SIGKILL") && child.exitCode === null && child.signalCode === null) {
+    throw new Error("failed to terminate mcp-proxy child");
+  }
+  await forcedExit;
 }
 
 async function waitForBackend(child, url) {
@@ -152,11 +178,7 @@ async function main() {
     stopSupervisor();
     server?.close();
     server?.closeAllConnections();
-    if (child.exitCode === null) {
-      child.kill("SIGTERM");
-      await Promise.race([once(child, "exit"), delay(3000)]).catch(() => {});
-      if (child.exitCode === null) child.kill("SIGKILL");
-    }
+    await terminateChild(child);
     process.exitCode = code;
   };
 

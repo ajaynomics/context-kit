@@ -382,19 +382,28 @@ cleanup_owned_container() {
   docker rm -f "${container_id}" >/dev/null 2>&1 || true
 }
 
+cleanup_owned_stdio_container() {
+  local container_id="$1" owner="$2" attach_pid="$3"
+  cleanup_owned_container "${container_id}" "${owner}"
+  if [[ -n "${attach_pid}" ]]; then
+    kill "${attach_pid}" >/dev/null 2>&1 || true
+    wait "${attach_pid}" 2>/dev/null || true
+  fi
+}
+
 run_owned_stdio_container() {
   local role="$1"
   shift
-  local uid owner name container_id='' status=0
+  local uid owner name container_id='' attach_pid='' status=0
   uid="$(id -u)"
   owner="${PROJECT}:${role}:${uid}:$$"
   name="${PROJECT}-${role}-${uid}-$$"
 
-  trap 'cleanup_owned_container "${container_id}" "${owner}"' EXIT
+  trap 'cleanup_owned_stdio_container "${container_id}" "${owner}" "${attach_pid}"' EXIT
   trap 'exit 129' HUP
   trap 'exit 130' INT
   trap 'exit 143' TERM
-  container_id="$(docker create -i --rm \
+  container_id="$(docker create -i --rm --init \
     --name "${name}" \
     --label dev.context-kit=true \
     --label dev.context-kit.lifecycle=client \
@@ -411,7 +420,10 @@ run_owned_stdio_container() {
     printf '%s\n' "${container_id}" > "${CONTEXT_KIT_DOCKER_CIDFILE}"
   fi
 
-  docker start -ai "${container_id}" <&0 || status=$?
+  docker start -ai "${container_id}" <&0 &
+  attach_pid=$!
+  wait "${attach_pid}" || status=$?
+  attach_pid=''
   cleanup_owned_container "${container_id}" "${owner}"
   trap - EXIT HUP INT TERM
   return "${status}"

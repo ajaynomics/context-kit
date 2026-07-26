@@ -1,15 +1,22 @@
 import assert from "node:assert/strict";
 import http from "node:http";
-import { once } from "node:events";
+import { EventEmitter, once } from "node:events";
+import { setTimeout as delay } from "node:timers/promises";
 
 import {
   createSecureMcpServer,
   mcpProxyArguments,
-  superviseBackend
+  superviseBackend,
+  terminateChild
 } from "../docker/web-search/http-entrypoint.mjs";
 import { probeMcp } from "../docker/web-search/mcp-probe.mjs";
 
 let backendAlive = true;
+let hangingBackendResponse;
+let resolveHangingBackendStarted;
+let resolveHangingBackendClosed;
+const hangingBackendStarted = new Promise(resolve => { resolveHangingBackendStarted = resolve; });
+const hangingBackendClosed = new Promise(resolve => { resolveHangingBackendClosed = resolve; });
 assert(mcpProxyArguments.includes("--stateless"));
 const backend = http.createServer(async (request, response) => {
   if (request.url === "/status") {
@@ -45,6 +52,14 @@ const backend = http.createServer(async (request, response) => {
       id: message.id,
       result: { tools: [{ name: "search_web" }, { name: "fetch_url" }] }
     }));
+    return;
+  }
+  if (message.method === "tools/call" && message.params?.name === "hang") {
+    hangingBackendResponse = response;
+    response.once("close", resolveHangingBackendClosed);
+    response.writeHead(200, { "Content-Type": "application/json" });
+    response.write("pending");
+    resolveHangingBackendStarted();
     return;
   }
   response.writeHead(500, { "Content-Type": "text/plain" });
@@ -89,6 +104,35 @@ assert.equal(await rawRequest({ host: "attacker.example" }), 421);
 assert.equal(await rawRequest({ host: `127.0.0.1:${frontPort}`, origin: "https://attacker.example" }), 403);
 assert.equal(await rawRequest({ host: `127.0.0.1:${frontPort}`, origin: `http://127.0.0.1:${frontPort}` }), 403);
 
+let downstreamResponse;
+try {
+  const responseReceived = new Promise((resolve, reject) => {
+    const request = http.request({
+      hostname: "127.0.0.1",
+      port: frontPort,
+      path: "/mcp",
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json"
+      }
+    }, resolve);
+    request.once("error", reject);
+    request.end('{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"hang","arguments":{}}}');
+  });
+  await hangingBackendStarted;
+  downstreamResponse = await responseReceived;
+  downstreamResponse.on("error", () => {});
+  downstreamResponse.destroy();
+  await Promise.race([
+    hangingBackendClosed,
+    delay(250).then(() => { throw new Error("upstream request remained open after downstream disconnect"); })
+  ]);
+} finally {
+  downstreamResponse?.destroy();
+  hangingBackendResponse?.destroy();
+}
+
 backendAlive = false;
 assert.equal((await fetch(`${upstream}/status`)).status, 200);
 assert.equal((await fetch(`http://127.0.0.1:${frontPort}/healthz`)).status, 503);
@@ -105,6 +149,28 @@ await new Promise((resolve, reject) => {
     }
   });
 });
+
+class StubbornChild extends EventEmitter {
+  exitCode = null;
+  signalCode = null;
+  signals = [];
+
+  kill(signal) {
+    this.signals.push(signal);
+    if (signal === "SIGKILL") {
+      setTimeout(() => {
+        this.signalCode = signal;
+        this.emit("exit", null, signal);
+      }, 10);
+    }
+    return true;
+  }
+}
+
+const stubbornChild = new StubbornChild();
+await terminateChild(stubbornChild, { graceMs: 1 });
+assert.deepEqual(stubbornChild.signals, ["SIGTERM", "SIGKILL"]);
+assert.equal(stubbornChild.signalCode, "SIGKILL");
 
 front.close();
 front.closeAllConnections();
