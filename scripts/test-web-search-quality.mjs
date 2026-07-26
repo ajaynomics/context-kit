@@ -30,19 +30,44 @@ assert.equal(failed.diagnostic.status, "error");
 assert.equal(failed.diagnostic.error.category, "network");
 
 let underlyingAborted = false;
+let underlyingCleanupFinished = false;
 const timedOut = await attemptProvider({
   name: "slow",
   async search(_query, _limit, _lang, signal) {
     await new Promise((resolve, reject) => {
       signal.addEventListener("abort", () => {
         underlyingAborted = true;
-        reject(signal.reason);
+        setTimeout(() => {
+          underlyingCleanupFinished = true;
+          reject(signal.reason);
+        }, 25);
       }, { once: true });
     });
   }
 }, "q", 3, "en", { timeoutMs: 20 });
 assert.equal(timedOut.diagnostic.error.category, "timeout");
 assert.equal(underlyingAborted, true);
+assert.equal(underlyingCleanupFinished, true);
+
+const cancellation = new AbortController();
+const cancellationReason = new Error("search request cancelled");
+let cancellationCleanupFinished = false;
+const cancelled = attemptProvider({
+  name: "cancelled",
+  async search(_query, _limit, _lang, signal) {
+    await new Promise((resolve, reject) => {
+      signal.addEventListener("abort", () => {
+        setTimeout(() => {
+          cancellationCleanupFinished = true;
+          reject(signal.reason);
+        }, 10);
+      }, { once: true });
+    });
+  }
+}, "q", 3, "en", { timeoutMs: 1000, signal: cancellation.signal });
+cancellation.abort(cancellationReason);
+await assert.rejects(cancelled, error => error === cancellationReason);
+assert.equal(cancellationCleanupFinished, true);
 
 const result = boundFetchCollections({
   links: Array.from({ length: 550 }, (_, index) => ({ url: `https://example.test/${index}` })),

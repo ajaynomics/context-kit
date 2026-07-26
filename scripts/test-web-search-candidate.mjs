@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { setTimeout as delay } from "node:timers/promises";
 
 import { probeMcp, rpc } from "../docker/web-search/mcp-probe.mjs";
 
@@ -56,4 +57,40 @@ const websocketCount = payload(await rpc(url, 9, "tools/call", {
 }, 30_000));
 assert.equal(websocketCount.content.trim(), "0");
 
-console.log("pass web-search candidate diagnostics, browser rendering, and SSRF rejection");
+let requestId = 10;
+async function slowCount() {
+  const result = payload(await rpc(url, requestId++, "tools/call", {
+    name: "fetch_url",
+    arguments: { url: "http://mock-search.test:8080/slow-count", engine: "http", format: "text", fresh: true }
+  }, 5_000));
+  return Number(result.content.trim());
+}
+
+async function waitForSlowCount(expected, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  let actual;
+  while (Date.now() < deadline) {
+    actual = await slowCount();
+    if (actual === expected) return;
+    await delay(50);
+  }
+  assert.equal(actual, expected, `slow request count did not reach ${expected}`);
+}
+
+const cancellation = new AbortController();
+const pendingFetch = rpc(url, requestId++, "tools/call", {
+  name: "fetch_url",
+  arguments: {
+    url: "http://mock-search.test:8080/slow",
+    engine: "browser",
+    format: "text",
+    fresh: true,
+    timeout_ms: 120_000
+  }
+}, 120_000, cancellation.signal);
+await waitForSlowCount(1, 10_000);
+cancellation.abort(new Error("candidate client disconnected"));
+await assert.rejects(pendingFetch, /candidate client disconnected/);
+await waitForSlowCount(0, 3_000);
+
+console.log("pass web-search candidate diagnostics, browser rendering, SSRF rejection, and cancellation");

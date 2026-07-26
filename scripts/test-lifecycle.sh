@@ -189,6 +189,14 @@ docker() {
       if service="$(fake_service_for_container "${container_id}" 2>/dev/null)"; then
         assert_docs_sources_restored_before_state_change
         touch "${FAKE_DOCKER_STATE}/service.${service}.running"
+      elif [[ -f "${FAKE_DOCKER_STATE}/owner.${container_id}" && "${FAKE_CLIENT_START_BLOCK:-0}" -eq 1 ]]; then
+        /bin/sh -c '
+          touch "$1"
+          while [ -f "$2" ] && [ ! -f "$3" ]; do /bin/sleep 0.02; done
+        ' sh \
+          "${FAKE_DOCKER_STATE}/client-attach.started" \
+          "${FAKE_DOCKER_STATE}/owner.${container_id}" \
+          "${FAKE_DOCKER_STATE}/client-attach.release"
       fi
       ;;
     rm)
@@ -259,7 +267,8 @@ new_case() {
   unset CONTEXT_KIT_DOCKER_CIDFILE CONTEXT_KIT_RUNTIME_DIR FAKE_DOCS_UID FAKE_WEB_UID \
     FAKE_REPLACEMENT_REQUIRED FAKE_RESTART_FAIL FAKE_DROP_RUNNING FAKE_SEARXNG_FAIL \
     FAKE_WEB_SEARCH_FAIL FAKE_DOCS_FAIL FAKE_LEGACY_CONTAINER FAKE_CLIENT_OWNER_MISMATCH \
-    FAKE_EXPECT_DOCS_SOURCES FAKE_EXPECT_DOCS_SOURCES_ABSENT CONTEXT_KIT_DOCS_LOCAL_SOURCES_DIR
+    FAKE_CLIENT_START_BLOCK FAKE_EXPECT_DOCS_SOURCES FAKE_EXPECT_DOCS_SOURCES_ABSENT \
+    CONTEXT_KIT_DOCS_LOCAL_SOURCES_DIR
   mkdir -p "${FAKE_DOCKER_STATE}" "${HOME}"
   : > "${FAKE_DOCKER_LOG}"
 }
@@ -339,10 +348,39 @@ touch "${FAKE_DOCKER_STATE}/network"
 seed_service web-search-mcp
 "${CONTEXT_KIT}" web-search </dev/null
 grep -E 'docker create .*dev.context-kit.lifecycle=client .*--entrypoint mcp-proxy .*http://web-search-mcp:8000/mcp' "${FAKE_DOCKER_LOG}" >/dev/null || fail_test "stdio bridge does not reuse the shared service"
+grep -F 'docker create -i --rm --init' "${FAKE_DOCKER_LOG}" >/dev/null || fail_test "stdio bridge container does not use Docker init"
 [[ -f "${FAKE_DOCKER_STATE}/service.web-search-mcp.running" ]] || fail_test "stdio bridge stopped the shared service"
 if compgen -G "${FAKE_DOCKER_STATE}/owner.*" >/dev/null; then
   fail_test "stdio bridge did not clean up its own container"
 fi
+
+new_case client-signal-cleanup
+touch "${FAKE_DOCKER_STATE}/network"
+seed_service web-search-mcp
+export FAKE_CLIENT_START_BLOCK=1
+"${CONTEXT_KIT}" web-search </dev/null >"${CASE_ROOT}/client.out" 2>&1 &
+client_pid=$!
+for _ in {1..100}; do
+  [[ -f "${FAKE_DOCKER_STATE}/client-attach.started" ]] && break
+  /bin/sleep 0.01
+done
+[[ -f "${FAKE_DOCKER_STATE}/client-attach.started" ]] || fail_test "blocking stdio attach did not start"
+kill -TERM "${client_pid}"
+owner_removed=0
+for _ in {1..50}; do
+  if ! compgen -G "${FAKE_DOCKER_STATE}/owner.*" >/dev/null; then
+    owner_removed=1
+    break
+  fi
+  /bin/sleep 0.01
+done
+touch "${FAKE_DOCKER_STATE}/client-attach.release"
+set +e
+wait "${client_pid}"
+client_status=$?
+set -e
+[[ "${owner_removed}" -eq 1 ]] || fail_test "SIGTERM did not promptly remove the owned stdio container"
+[[ "${client_status}" -eq 143 ]] || fail_test "SIGTERM returned ${client_status} instead of 143"
 
 new_case client-owner-isolation
 touch "${FAKE_DOCKER_STATE}/network"

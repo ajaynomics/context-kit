@@ -49,7 +49,7 @@ export async function runSmoke({ usage, tmpPrefix, timeoutMs, clientInfo, scenar
   }
 }
 
-class McpSmokeClient {
+export class McpSmokeClient {
   constructor({ command, args, tmpPrefix }) {
     this.tmpDir = mkdtempSync(join(tmpdir(), tmpPrefix));
     this.cidFile = join(this.tmpDir, "container.cid");
