@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+cd "${ROOT}"
+
+tmp_dir="$(mktemp -d)"
+trap 'rm -rf "${tmp_dir}"' EXIT
+
+fail() {
+  printf 'ci: %s\n' "$*" >&2
+  exit 1
+}
+
+need_command() {
+  command -v "$1" >/dev/null 2>&1 || fail "required command is unavailable: $1"
+}
+
+need_command git
+need_command node
+need_command python3
+need_command sh
+
+git diff --check HEAD
+git show --check --format= HEAD >/dev/null
+
+git ls-files --cached --error-unmatch \
+  bin/context-kit \
+  compose.yml \
+  docker/docs/constraints.txt \
+  docker/docs/Dockerfile \
+  docker/docs/entrypoint.sh \
+  docker/web-search/Dockerfile \
+  docker/web-search/http-entrypoint.mjs \
+  docker/web-search/mcp-probe.mjs \
+  docker/web-search/overrides/bing.js \
+  docker/web-search/overrides/bounds.mjs \
+  docker/web-search/overrides/brave.js \
+  docker/web-search/overrides/browser-fetch.js \
+  docker/web-search/overrides/diagnostics.mjs \
+  docker/web-search/overrides/registry.js \
+  docker/web-search/patch-mcp-proxy.py \
+  docker/web-search/patch-mcp-web-search.mjs \
+  scripts/ci \
+  scripts/docs-rebuild.mjs \
+  scripts/docs_snapshot.py \
+  scripts/mcp-smoke-client.mjs \
+  scripts/release-check \
+  scripts/smoke-docs.mjs \
+  scripts/smoke-repomix.mjs \
+  scripts/smoke-web-search.mjs \
+  scripts/test-doc-snapshots.py \
+  scripts/test-web-search-http.mjs \
+  scripts/test-web-search-quality.mjs \
+  snippets/claude.mcp.json \
+  snippets/opencode.json >/dev/null
+
+bash -n bin/context-kit
+bash -n scripts/ci
+bash -n scripts/release-check
+sh -n docker/docs/entrypoint.sh
+
+node --check docker/web-search/http-entrypoint.mjs
+node --check docker/web-search/mcp-probe.mjs
+node --check docker/web-search/overrides/bing.js
+node --check docker/web-search/overrides/bounds.mjs
+node --check docker/web-search/overrides/brave.js
+node --check docker/web-search/overrides/browser-fetch.js
+node --check docker/web-search/overrides/diagnostics.mjs
+node --check docker/web-search/overrides/registry.js
+node --check docker/web-search/patch-mcp-web-search.mjs
+node --check scripts/docs-rebuild.mjs
+node --check scripts/mcp-smoke-client.mjs
+node --check scripts/smoke-docs.mjs
+node --check scripts/smoke-repomix.mjs
+node --check scripts/smoke-web-search.mjs
+node --check scripts/test-docs-candidate.mjs
+node --check scripts/test-web-search-candidate.mjs
+node --check scripts/test-web-search-http.mjs
+node --check scripts/test-web-search-quality.mjs
+node --check scripts/test-web-search-stdio-cancellation.mjs
+node --check scripts/fixtures/web/mock-server.mjs
+
+python3 - <<'PY'
+import ast
+from pathlib import Path
+
+for name in (
+    "docker/web-search/patch-mcp-proxy.py",
+    "scripts/docs_snapshot.py",
+    "scripts/test-doc-snapshots.py",
+):
+    ast.parse(Path(name).read_text(encoding="utf-8"), filename=name)
+PY
+
+node -e 'const fs=require("node:fs"); JSON.parse(fs.readFileSync("snippets/opencode.json", "utf8")); JSON.parse(fs.readFileSync("snippets/claude.mcp.json", "utf8"));'
+
+bin/context-kit install opencode > "${tmp_dir}/opencode.json"
+bin/context-kit install claude > "${tmp_dir}/claude.json"
+node -e 'const fs=require("node:fs"); for (const file of process.argv.slice(1)) JSON.parse(fs.readFileSync(file, "utf8"));' \
+  "${tmp_dir}/opencode.json" \
+  "${tmp_dir}/claude.json"
+
+bin/context-kit redaction-check \
+  LICENSE \
+  README.md \
+  bin \
+  compose.yml \
+  config \
+  docker \
+  docs \
+  scripts \
+  snippets
+
+python3 scripts/test-doc-snapshots.py
+node scripts/test-web-search-quality.mjs
+node scripts/test-web-search-http.mjs
+
+printf 'pass ci\n'

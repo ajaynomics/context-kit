@@ -1,0 +1,27 @@
+# Managed by gitea-project-onboarding.py.
+# Edit .gitea/onboarding.json and rerun the sysadmin onboarding tool.
+name: Golden Path CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Run project CI
+        shell: bash
+        run: |
+          set -euo pipefail
+          scripts/ci
