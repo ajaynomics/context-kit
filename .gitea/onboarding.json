@@ -1,0 +1,13 @@
+{
+  "cache": {
+    "mode": "none"
+  },
+  "deployment": null,
+  "image_build": null,
+  "ordinary_ci": {
+    "command": "scripts/ci",
+    "timeout_minutes": 15
+  },
+  "repository": "ajaynomics/context-kit",
+  "version": 1
+}
