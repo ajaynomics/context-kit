@@ -120,12 +120,34 @@ Context Kit patches the upstream `mcp-web-search` schema so the accepted
 `max_download_bytes` value matches `CONTEXT_KIT_WEB_SEARCH_MAX_BYTES`, which
 defaults to `52428800`.
 
+## SearXNG Returns Only Bing, or Google Is Empty
+
+SearXNG is digest-pinned in `compose.yml`. `start` never replaces that
+container, so an image or `settings.yml` change does nothing until you
+recreate SearXNG explicitly:
+
+```sh
+docker compose -p "${CONTEXT_KIT_COMPOSE_PROJECT:-context-kit}" -f compose.yml \
+  up -d --force-recreate --no-deps searxng
+```
+
+Then probe engines separately:
+
+```sh
+curl 'http://127.0.0.1:8099/search?q=test&format=json&engines=bing'
+curl 'http://127.0.0.1:8099/search?q=test&format=json&engines=google'
+```
+
+Google is a scraper. A successful HTTP 200 with zero results usually means
+the pinned image's parser/user-agent is stale, not that Google is disabled.
+DuckDuckGo is omitted from `settings.yml` because it CAPTCHAs this host.
+
 ## Search Fallback and Chromium
 
-`search_web` defaults to SearXNG. If SearXNG fails or returns no results, the
-upstream fallback order is DuckDuckGo, then Bing. Bing uses Chromium through
-Puppeteer, so `bin/context-kit doctor` checks that the configured Chromium path
-exists inside the web-search image.
+`search_web` defaults to SearXNG (Bing and Google). If SearXNG fails or
+returns no results, the MCP fallback order is DuckDuckGo, then Chromium Bing.
+The Chromium Bing path is a last resort; `bin/context-kit doctor` checks that
+the configured Chromium path exists inside the web-search image.
 
 Context Kit carries a source-controlled Bing provider override in
 `docker/web-search/overrides/bing.js` because the upstream 1.3.0 provider can

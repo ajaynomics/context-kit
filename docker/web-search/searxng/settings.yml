@@ -1,7 +1,6 @@
 use_default_settings:
   engines:
     keep_only:
-      - duckduckgo
       - bing
       - google
 
@@ -34,8 +33,6 @@ outgoing:
   pool_maxsize: 20
 
 engines:
-  - name: duckduckgo
-    disabled: false
   - name: bing
     disabled: false
   - name: google

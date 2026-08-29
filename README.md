@@ -55,7 +55,10 @@ config that will not be committed.
 
 ## How It Runs
 
-- SearXNG binds to `127.0.0.1:8099` only.
+- SearXNG binds to `127.0.0.1:8099` only. It runs Bing and Google; DuckDuckGo
+  is omitted because it CAPTCHAs this class of local instance.
+- `start` never replaces an existing container. Recreate SearXNG explicitly
+  after an image or `settings.yml` change; see `docs/troubleshooting.md`.
 - `context-web-search` and `context-docs` are long-lived HTTP MCP services on
   `127.0.0.1:8777` and `127.0.0.1:8776`. All assistant projects reuse them.
 - `bin/context-kit web-search` and `bin/context-kit docs` are stdio bridges for
