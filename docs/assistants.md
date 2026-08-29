@@ -52,7 +52,10 @@ bin/context-kit install opencode
 ```
 
 Merge the printed `mcp` block into your OpenCode config and restart OpenCode.
-OpenCode reads config at startup.
+OpenCode reads config at startup. Use the HTTP `url` for `context-web-search`
+and `context-docs`. The stdio `context-kit web-search` command is a fallback
+for clients that cannot speak HTTP MCP; each call starts a Docker bridge
+container that lives as long as the assistant session.
 
 Use `bin/context-kit install opencode --absolute` only for private machine-local
 config that will not be committed.

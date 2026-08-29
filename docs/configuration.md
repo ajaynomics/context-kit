@@ -57,7 +57,7 @@ Only the variables below are part of the public configuration surface. Other
 |---|---|---|
 | `CONTEXT_KIT_DATA_DIR` | `$HOME/.local/share/context-kit` | Persistent docs indexes and model cache |
 | `CONTEXT_KIT_COMPOSE_PROJECT` | `context-kit` | Shared-service ownership boundary and Compose name prefix |
-| `CONTEXT_KIT_SEARXNG_PORT` | `8099` | Localhost SearXNG port |
+| `CONTEXT_KIT_SEARXNG_PORT` | `8099` | Localhost SearXNG port. Engines are Bing and Google; DuckDuckGo is disabled |
 | `CONTEXT_KIT_WEB_SEARCH_PORT` | `8777` | Localhost port for the long-lived web-search HTTP service |
 | `CONTEXT_KIT_WEB_SEARCH_HTTP_URL` | `http://127.0.0.1:${CONTEXT_KIT_WEB_SEARCH_PORT}/mcp` | URL emitted into HTTP MCP install snippets |
 | `CONTEXT_KIT_WEB_SEARCH_MAX_BYTES` | `52428800` | Max bytes `context-web-search` accepts and downloads per fetch |
