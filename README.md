@@ -110,6 +110,7 @@ The default docs index uses the vendors' content-bearing `llms-full.txt` feeds:
 - OpenAI API docs and reference
 - OpenRouter docs
 - Model Context Protocol docs
+- Hermes Agent docs
 
 Optional profiles live in `config/`:
 
