@@ -1,8 +1,0 @@
-*
-!Dockerfile
-!entrypoint.sh
-!constraints.txt
-!context_docs/
-!context_docs/**
-!tests/
-!tests/**

@@ -1,8 +1,0 @@
-.env
-.env.local
-.DS_Store
-.cache/
-tmp/
-*.log
-__pycache__/
-*.py[cod]

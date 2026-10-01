@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "${ROOT}"
+
+bash -n bin/context-kit
+bash -n scripts/check
+sh -n docker/docs/entrypoint.sh
+node --check docker/web-search/patch-mcp-web-search.mjs
+node --check docker/web-search/overrides/bing.js
+node -e 'const fs=require("node:fs"); JSON.parse(fs.readFileSync("snippets/opencode.json", "utf8")); JSON.parse(fs.readFileSync("snippets/claude.mcp.json", "utf8"));'
+bin/context-kit install opencode | node -e 'JSON.parse(require("node:fs").readFileSync(0, "utf8"))'
+bin/context-kit install claude | node -e 'JSON.parse(require("node:fs").readFileSync(0, "utf8"))'
+docker compose -f compose.yml config --quiet
+docker compose -f compose.yml --profile mcp build web-search-mcp
+bin/context-kit doctor
+
+web_search_response="$(
+  printf '%s\n' \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"context-kit-check","version":"0.0.0"}}}' \
+    '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+    '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"fetch_url","arguments":{"url":"http://127.0.0.1:1/","max_download_bytes":52428800}}}' \
+    | CONTEXT_KIT_WEB_SEARCH_MAX_BYTES=52428800 bin/context-kit web-search
+)"
+for expected in '"name":"fetch_url"' '"maximum":52428800' 'Blocked localhost/private URL'; do
+  [[ "${web_search_response}" == *"${expected}"* ]] || {
+    printf 'context-kit: web-search MCP check missing %s\n' "${expected}" >&2
+    exit 1
+  }
+done
+
+repomix_response="$(
+  printf '%s\n' \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"context-kit-check","version":"0.0.0"}}}' \
+    '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"pack_codebase","arguments":{"directory":".","compress":true,"includePatterns":"README.md","ignorePatterns":"","topFilesLength":1,"style":"xml"}}}' \
+    | bin/context-kit repomix
+)"
+[[ "${repomix_response}" == *'"totalFiles":1'* ]] || {
+  printf 'context-kit: Repomix MCP tool call did not pack exactly README.md\n' >&2
+  exit 1
+}
+
+printf 'pass check\n'

@@ -1,8 +1,0 @@
-*
-!Dockerfile
-!http-entrypoint.mjs
-!mcp-probe.mjs
-!patch-mcp-proxy.py
-!patch-mcp-web-search.mjs
-!overrides/
-!overrides/bing.js
