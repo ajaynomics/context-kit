@@ -127,8 +127,11 @@ CONTEXT_KIT_DOCS_SOURCES="config/sources.default.txt config/sources.js.txt" \
 
 The docs service reads its source list once, at startup. After changing
 sources, run `restart`; `start` writes the new list but leaves a running docs
-service on the old one, and says so. `bin/context-kit docs` is only a stdio
-bridge to the already-running docs service.
+service on the old one, and says so. Then index any new source with
+`bin/context-kit docs-rebuild SOURCE_URL`, so the first query does not have to.
+See [Source Profiles](docs/configuration.md#source-profiles).
+`bin/context-kit docs` is only a stdio bridge to the already-running docs
+service.
 
 `docs_query` searches with FTS5 plus embeddings, deduplicates exact content,
 and supports source/host filters. It returns snippets but does not retrieve full
