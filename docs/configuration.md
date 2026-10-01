@@ -165,9 +165,20 @@ The docs MCP accepts one or more source profile files:
 CONTEXT_KIT_DOCS_SOURCES="config/sources.default.txt config/sources.js.txt"
 ```
 
-Source changes are loaded when the docs service starts. Run `bin/context-kit
-restart` after changing `CONTEXT_KIT_DOCS_SOURCES`; `bin/context-kit docs` only
-bridges stdio clients to the already-running service.
+The docs service reads its source list once, when its container starts. Run
+`bin/context-kit restart` after changing `CONTEXT_KIT_DOCS_SOURCES` or editing
+any profile file it names. `start` regenerates the list too, but it never
+restarts a running container, so it leaves a running docs service on the old
+list and warns that a restart is needed. `bin/context-kit docs` only bridges
+stdio clients to the already-running service.
+
+`restart` restarts all three shared services, so every connected assistant
+loses web search and docs until they are ready again.
+
+A restart does not index a newly added source. Index it before anyone queries
+it, with `bin/context-kit docs-rebuild SOURCE_URL` or the `docs_refresh` tool;
+otherwise the first `docs_query` after the restart does that work inline, and a
+large feed can take several minutes on CPU, longer than many clients wait.
 
 `CONTEXT_KIT_DOCS_SOURCES` may include absolute paths to private machine-local
 profile files. Each profile file is plain text; blank lines and `#` comments are

@@ -423,6 +423,34 @@ seed_service docs-mcp
 grep -F 'up -d --no-recreate searxng web-search-mcp docs-mcp' "${FAKE_DOCKER_LOG}" >/dev/null || fail_test "upgrade omitted --no-recreate"
 grep -E 'docker (network|volume) rm' "${FAKE_DOCKER_LOG}" >/dev/null && fail_test "upgrade removed an origin resource"
 
+new_case start-sources-under-running-docs
+seed_service searxng
+seed_service web-search-mcp
+seed_service docs-mcp
+printf 'https://example.test/llms.txt\n' > "${CASE_ROOT}/sources.txt"
+export CONTEXT_KIT_DOCS_SOURCES="${CASE_ROOT}/sources.txt"
+"${CONTEXT_KIT}" restart
+"${CONTEXT_KIT}" start >"${CASE_ROOT}/unchanged.out" 2>&1
+grep -F "context-kit restart" "${CASE_ROOT}/unchanged.out" >/dev/null \
+  && fail_test "start asked for a restart although docs sources were unchanged"
+printf 'https://example.test/llms.txt\nhttps://added.example.test/llms.txt\n' > "${CASE_ROOT}/sources.txt"
+"${CONTEXT_KIT}" start >"${CASE_ROOT}/changed.out" 2>&1
+grep -F "run 'context-kit restart' to load them" "${CASE_ROOT}/changed.out" >/dev/null \
+  || fail_test "start changed docs sources under a running docs-mcp without saying they need a restart"
+grep -F 'https://added.example.test/llms.txt' "${CONTEXT_KIT_DATA_DIR}/docs-sources.txt" >/dev/null \
+  || fail_test "start did not write the changed docs sources"
+assert_no_docs_sources_artifacts
+
+new_case start-sources-with-stopped-docs
+seed_service searxng
+seed_service web-search-mcp
+seed_service docs-mcp stopped
+printf 'https://example.test/llms.txt\n' > "${CASE_ROOT}/sources.txt"
+export CONTEXT_KIT_DOCS_SOURCES="${CASE_ROOT}/sources.txt"
+"${CONTEXT_KIT}" start >"${CASE_ROOT}/start.out" 2>&1
+grep -F "context-kit restart" "${CASE_ROOT}/start.out" >/dev/null \
+  && fail_test "start asked for a restart although it started docs-mcp with the new sources"
+
 new_case replacement-required
 seed_service searxng
 seed_service web-search-mcp

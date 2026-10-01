@@ -175,6 +175,22 @@ Cloudflare and other large docs sets can take significantly longer than the
 default source profile. Set `CONTEXT_KIT_DOCS_PREINDEX=1` only if you want
 startup to eagerly embed every configured source.
 
+## A New Docs Source Does Not Appear
+
+If `docs_sources` does not list a source you added, or `docs-rebuild` fails with
+`unconfigured sources`, the running docs service is still on its old source
+list. It reads the list only at startup, and `start` does not restart a running
+container; it warns instead. Restart, then index the new source:
+
+```sh
+bin/context-kit restart
+bin/context-kit docs-rebuild https://example.com/llms-full.txt
+```
+
+Edit the profile files named by `CONTEXT_KIT_DOCS_SOURCES`, not the generated
+`docs-sources.txt` under the data directory; every lifecycle command overwrites
+that file.
+
 ## Docs Sources Report Refresh Errors
 
 If `docs_sources` reports `last_error`, the service keeps the previous generation

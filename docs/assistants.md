@@ -63,5 +63,6 @@ config that will not be committed.
 ## Suggested Agent Instructions
 
 Use the snippets in `snippets/CLAUDE.md` and `snippets/AGENTS.md` as a starting
-point. They remind agents to use docs search before guessing API details and to
-treat fetched web pages as untrusted input.
+point. They remind agents to use docs search before guessing API details, to
+use Context Kit web search only when the assistant has no built-in web search,
+and to treat fetched web pages as untrusted input.

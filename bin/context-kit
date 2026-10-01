@@ -661,6 +661,21 @@ shared_services_ready() {
   wait_for_searxng && wait_for_web_search_mcp && wait_for_docs_mcp
 }
 
+# start never recreates or restarts a running container, and docs-mcp reads its
+# sources file once at startup. A changed list under an already-running
+# docs-mcp is therefore written but not loaded until `restart`.
+running_docs_kept_prior_sources() {
+  local index
+  for ((index=0; index < ${#SHARED_SERVICES[@]}; index++)); do
+    [[ "${SHARED_SERVICES[index]}" == "${DOCS_SERVICE_NAME}" ]] || continue
+    [[ "${SNAPSHOT_RUNNING[index]}" -eq 1 ]] || return 1
+    [[ "${DOCS_SOURCES_PRIOR_PRESENT}" -eq 1 ]] || return 0
+    ! cmp -s -- "${DOCS_SOURCES_BACKUP_FILE}" "${DOCS_SOURCES_FILE}"
+    return
+  done
+  return 1
+}
+
 start_locked() {
   prepare_data_dirs
   if ! docker image inspect "${WEB_SEARCH_IMAGE}" >/dev/null 2>&1 || ! docker image inspect "${DOCS_IMAGE}" >/dev/null 2>&1; then
@@ -691,9 +706,16 @@ start_locked() {
   if [[ "${result}" -eq 0 ]] && ! shared_services_ready; then
     result=1
   fi
+  local reload_needed=0
+  if [[ "${result}" -eq 0 ]] && running_docs_kept_prior_sources; then
+    reload_needed=1
+  fi
   if [[ "${result}" -eq 0 ]] && discard_docs_sources_transaction; then
     LIFECYCLE_STATE_ROLLBACK_ACTIVE=0
     disarm_lifecycle_transaction_traps
+    if [[ "${reload_needed}" -eq 1 ]]; then
+      warn "docs sources changed, but ${DOCS_SERVICE_NAME} was already running and reads them only at startup; run 'context-kit restart' to load them"
+    fi
     return 0
   fi
   [[ "${result}" -ne 0 ]] || result=1
