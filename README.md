@@ -20,7 +20,7 @@ docs search, and repository packing.
 ## Quick Start
 
 ```sh
-git clone https://gitea.krishnan.ca/ajaynomics/context-kit.git
+git clone https://github.com/ajaynomics/context-kit.git
 cd context-kit
 cp .env.example .env
 export PATH="$PWD/bin:$PATH"
